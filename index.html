@@ -539,18 +539,9 @@ async function fetchInfo() {
       highTideRes.json(), tsunamiRes.json(), sedimentRes.json(), liquidRes.json()
     ]);
 
-    // デバッグ：実際のAPIレスポンスをコンソールに出力
-    console.log('XKT002 用途地域:', JSON.stringify(zoning?.features?.[0]?.properties));
-    console.log('XKT014 防火地域:', JSON.stringify(fire?.features?.[0]?.properties));
-    console.log('XKT026 洪水:', JSON.stringify(flood?.features?.[0]?.properties));
-    console.log('XKT027 高潮:', JSON.stringify(highTide?.features?.[0]?.properties));
-    console.log('XKT028 津波:', JSON.stringify(tsunami?.features?.[0]?.properties));
-    console.log('XKT029 土砂:', JSON.stringify(sediment?.features?.[0]?.properties));
-    console.log('XKT025 液状化:', JSON.stringify(liquid?.features?.[0]?.properties));
-
-    // 用途地域の抽出（APIドキュメント準拠のプロパティ名）
-    const zoningFeature = zoning.features?.[0]?.properties || {};
-    const fireFeature   = fire.features?.[0]?.properties || {};
+    // 用途地域・防火地域の抽出（undefined安全処理）
+    const zoningFeature = (zoning?.features?.length > 0 ? zoning.features[0].properties : null) || {};
+    const fireFeature   = (fire?.features?.length   > 0 ? fire.features[0].properties   : null) || {};
 
     // コンソールログで確認した正しいプロパティ名で取得
     const parsedZoning = {
@@ -561,22 +552,30 @@ async function fetchInfo() {
       高度地区: zoningFeature.koudo_chiku_ja       || '—',
     };
 
-    // ハザード情報（featuresが空またはundefined＝区域外として安全に処理）
-    function hazardVal(data, valueFn, level) {
-      try {
-        if (!data || !data.features || data.features.length === 0) return { value: '区域外', level: 'safe' };
-        return { value: valueFn(data.features[0].properties) || '区域内', level };
-      } catch(e) {
-        return { value: '区域外', level: 'safe' };
-      }
+    // ハザード情報（区域外・undefined・空配列・エラー全て安全に処理）
+    function hasFeatures(data) {
+      return data && Array.isArray(data.features) && data.features.length > 0 && data.features[0] !== null;
+    }
+    function safeGet(data, valueFn) {
+      try { return valueFn(data.features[0].properties) || '区域内'; } catch(e) { return '区域内'; }
     }
 
     const parsedHazard = {
-      洪水浸水想定:     hazardVal(flood,    p => p.A31a_201 ? `${p.A31a_201}〜${p.A31a_202}` : p.maximum_scale_chogoku, 'warn'),
-      高潮浸水想定:     hazardVal(highTide, p => p.scale || p.A31a_201, 'warn'),
-      津波浸水想定:     hazardVal(tsunami,  p => p.A40_003 ? `〜${p.A40_003}` : '区域内', 'warn'),
-      土砂災害警戒区域: hazardVal(sediment, p => p.A33_007 ? `${p.A33_006} ${p.A33_007}` : '区域内', 'danger'),
-      液状化リスク:     hazardVal(liquid,   p => p.topographic_classification_name_ja || p.note, 'warn'),
+      洪水浸水想定:     hasFeatures(flood)
+        ? { value: safeGet(flood,    p => p.A31a_201 ? `${p.A31a_201}〜${p.A31a_202}` : p.maximum_scale_chogoku), level: 'warn' }
+        : { value: '区域外', level: 'safe' },
+      高潮浸水想定:     hasFeatures(highTide)
+        ? { value: safeGet(highTide, p => p.scale || p.A31a_201 || '区域内'), level: 'warn' }
+        : { value: '区域外', level: 'safe' },
+      津波浸水想定:     hasFeatures(tsunami)
+        ? { value: safeGet(tsunami,  p => p.A40_003 ? `〜${p.A40_003}m` : '区域内'), level: 'warn' }
+        : { value: '区域外', level: 'safe' },
+      土砂災害警戒区域: hasFeatures(sediment)
+        ? { value: safeGet(sediment, p => p.A33_007 ? `${p.A33_005}（${p.A33_007}）` : '区域内'), level: 'danger' }
+        : { value: '区域外', level: 'safe' },
+      液状化リスク:     hasFeatures(liquid)
+        ? { value: safeGet(liquid,   p => p.topographic_classification_name_ja || p.note || '要確認'), level: 'warn' }
+        : { value: 'データなし', level: 'safe' },
     };
 
     renderResults({ zoning: parsedZoning, hazard: parsedHazard }, currentLat, currentLng, false);
