@@ -660,11 +660,14 @@ function renderResults(data, lat, lng, isMock) {
 
       <div class="section-sep">ハザード情報（不動産情報ライブラリ API）</div>
 
-      ${Object.entries(h).map(([label, v]) => `
-      <div class="result-item">
+      ${Object.entries(h).map(([label, v]) => {
+        const level = (v && v.level) ? v.level : 'safe';
+        const value = (v && v.value) ? v.value : '—';
+        return `<div class="result-item">
         <div class="r-label">${label}</div>
-        <div class="r-value ${v.level}">${v.value}</div>
-      </div>`).join('')}
+        <div class="r-value ${level}">${value}</div>
+      </div>`;
+      }).join('')}
 
       <div class="section-sep">重説記載文（自動生成）</div>
 
