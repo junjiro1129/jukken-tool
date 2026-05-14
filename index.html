@@ -502,86 +502,72 @@ document.addEventListener('DOMContentLoaded', () => {
 function lng2tile(lng, z) { return Math.floor((lng + 180) / 360 * Math.pow(2, z)); }
 function lat2tile(lat, z) { return Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z)); }
 
+/* ===== APIから安全にfeatures[0].propertiesを取得 ===== */
+async function safeApiCall(apiId, z, x, y) {
+  try {
+    const res = await fetch(`${PROXY_URL}?api=${apiId}&z=${z}&x=${x}&y=${y}`);
+    const json = await res.json();
+    if (json && Array.isArray(json.features) && json.features.length > 0) {
+      return json.features[0].properties || {};
+    }
+  } catch(e) {}
+  return null; // null = 区域外 or 取得失敗
+}
+
+function hazardResult(props, valueFn, level) {
+  if (!props) return { value: '区域外', level: 'safe' };
+  try {
+    const v = valueFn(props);
+    return { value: v || '区域内', level };
+  } catch(e) {
+    return { value: '区域内', level };
+  }
+}
+
 /* ===== 公的情報取得 ===== */
 async function fetchInfo() {
   if (!currentLat || !currentLng) return;
   const btn = document.getElementById('fetch-btn');
   setLoading(btn, '取得中…');
   const area = document.getElementById('result-area');
-  area.innerHTML = `<div class="card"><div class="loading-msg"><div class="spinner"></div>不動産情報ライブラリAPI・国土地理院に接続中…</div></div>`;
+  area.innerHTML = `<div class="card"><div class="loading-msg"><div class="spinner"></div>不動産情報ライブラリAPIに接続中…</div></div>`;
 
   const z = 15;
   const x = lng2tile(currentLng, z);
   const y = lat2tile(currentLat, z);
 
   try {
-    // Worker経由で複数APIを並列取得
-    const [
-      zoningRes,      // XKT002: 用途地域
-      fireRes,        // XKT014: 防火・準防火地域
-      floodRes,       // XKT026: 洪水浸水想定
-      highTideRes,    // XKT027: 高潮浸水想定
-      tsunamiRes,     // XKT028: 津波浸水想定
-      sedimentRes,    // XKT029: 土砂災害警戒区域
-      liquidRes,      // XKT025: 液状化
-    ] = await Promise.all([
-      fetch(`${PROXY_URL}?api=XKT002&z=${z}&x=${x}&y=${y}`),
-      fetch(`${PROXY_URL}?api=XKT014&z=${z}&x=${x}&y=${y}`),
-      fetch(`${PROXY_URL}?api=XKT026&z=${z}&x=${x}&y=${y}`),
-      fetch(`${PROXY_URL}?api=XKT027&z=${z}&x=${x}&y=${y}`),
-      fetch(`${PROXY_URL}?api=XKT028&z=${z}&x=${x}&y=${y}`),
-      fetch(`${PROXY_URL}?api=XKT029&z=${z}&x=${x}&y=${y}`),
-      fetch(`${PROXY_URL}?api=XKT025&z=${z}&x=${x}&y=${y}`),
-    ]);
-
+    // 7本のAPIを並列取得（各自エラー時はnullを返す）
     const [zoning, fire, flood, highTide, tsunami, sediment, liquid] = await Promise.all([
-      zoningRes.json(), fireRes.json(), floodRes.json(),
-      highTideRes.json(), tsunamiRes.json(), sedimentRes.json(), liquidRes.json()
+      safeApiCall('XKT002', z, x, y), // 用途地域
+      safeApiCall('XKT014', z, x, y), // 防火地域
+      safeApiCall('XKT026', z, x, y), // 洪水
+      safeApiCall('XKT027', z, x, y), // 高潮
+      safeApiCall('XKT028', z, x, y), // 津波
+      safeApiCall('XKT029', z, x, y), // 土砂災害
+      safeApiCall('XKT025', z, x, y), // 液状化
     ]);
 
-    // 用途地域・防火地域の抽出（undefined安全処理）
-    const zoningFeature = (zoning?.features?.length > 0 ? zoning.features[0].properties : null) || {};
-    const fireFeature   = (fire?.features?.length   > 0 ? fire.features[0].properties   : null) || {};
-
-    // コンソールログで確認した正しいプロパティ名で取得
     const parsedZoning = {
-      用途地域: zoningFeature.use_area_ja          || '都市計画区域外',
-      建蔽率:   zoningFeature.u_building_coverage_ratio_ja || '—',
-      容積率:   zoningFeature.u_floor_area_ratio_ja        || '—',
-      防火指定: fireFeature.fire_prevention_on_ja  || '指定なし',
-      高度地区: zoningFeature.koudo_chiku_ja       || '—',
+      用途地域: zoning?.use_area_ja                    || '都市計画区域外',
+      建蔽率:   zoning?.u_building_coverage_ratio_ja   || '—',
+      容積率:   zoning?.u_floor_area_ratio_ja          || '—',
+      防火指定: fire?.fire_prevention_on_ja            || '指定なし',
+      高度地区: zoning?.koudo_chiku_ja                 || '—',
     };
 
-    // ハザード情報（区域外・undefined・空配列・エラー全て安全に処理）
-    function hasFeatures(data) {
-      return data && Array.isArray(data.features) && data.features.length > 0 && data.features[0] !== null;
-    }
-    function safeGet(data, valueFn) {
-      try { return valueFn(data.features[0].properties) || '区域内'; } catch(e) { return '区域内'; }
-    }
-
     const parsedHazard = {
-      洪水浸水想定:     hasFeatures(flood)
-        ? { value: safeGet(flood,    p => p.A31a_201 ? `${p.A31a_201}〜${p.A31a_202}` : p.maximum_scale_chogoku), level: 'warn' }
-        : { value: '区域外', level: 'safe' },
-      高潮浸水想定:     hasFeatures(highTide)
-        ? { value: safeGet(highTide, p => p.scale || p.A31a_201 || '区域内'), level: 'warn' }
-        : { value: '区域外', level: 'safe' },
-      津波浸水想定:     hasFeatures(tsunami)
-        ? { value: safeGet(tsunami,  p => p.A40_003 ? `〜${p.A40_003}m` : '区域内'), level: 'warn' }
-        : { value: '区域外', level: 'safe' },
-      土砂災害警戒区域: hasFeatures(sediment)
-        ? { value: safeGet(sediment, p => p.A33_007 ? `${p.A33_005}（${p.A33_007}）` : '区域内'), level: 'danger' }
-        : { value: '区域外', level: 'safe' },
-      液状化リスク:     hasFeatures(liquid)
-        ? { value: safeGet(liquid,   p => p.topographic_classification_name_ja || p.note || '要確認'), level: 'warn' }
-        : { value: 'データなし', level: 'safe' },
+      洪水浸水想定:     hazardResult(flood,    p => p.A31a_201 ? `${p.A31a_201}〜${p.A31a_202}` : p.maximum_scale_chogoku, 'warn'),
+      高潮浸水想定:     hazardResult(highTide, p => p.scale || p.A31a_201, 'warn'),
+      津波浸水想定:     hazardResult(tsunami,  p => p.A40_003 ? `〜${p.A40_003}m` : '区域内', 'warn'),
+      土砂災害警戒区域: hazardResult(sediment, p => p.A33_007 ? `${p.A33_005}（${p.A33_007}）` : '区域内', 'danger'),
+      液状化リスク:     hazardResult(liquid,   p => p.topographic_classification_name_ja || p.note, 'warn'),
     };
 
     renderResults({ zoning: parsedZoning, hazard: parsedHazard }, currentLat, currentLng, false);
 
   } catch(e) {
-    area.innerHTML = `<div class="card"><div class="err-msg">⚠️ API取得中にエラーが発生しました。時間をおいて再試行してください。<br><small>${e}</small></div></div>`;
+    area.innerHTML = `<div class="card"><div class="err-msg">⚠️ 予期しないエラーが発生しました。<br><small>${e}</small></div></div>`;
   }
 
   resetBtn(btn,
