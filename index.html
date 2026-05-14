@@ -552,21 +552,31 @@ async function fetchInfo() {
     const zoningFeature = zoning.features?.[0]?.properties || {};
     const fireFeature   = fire.features?.[0]?.properties || {};
 
+    // コンソールログで確認した正しいプロパティ名で取得
     const parsedZoning = {
-      用途地域: zoningFeature.use_area_ja || '都市計画区域外',
+      用途地域: zoningFeature.use_area_ja          || '都市計画区域外',
       建蔽率:   zoningFeature.u_building_coverage_ratio_ja || '—',
       容積率:   zoningFeature.u_floor_area_ratio_ja        || '—',
-      防火指定: fireFeature.use_area_ja || '指定なし',
-      高度地区: zoningFeature.koudo_chiku_ja || '—',
+      防火指定: fireFeature.fire_prevention_on_ja  || '指定なし',
+      高度地区: zoningFeature.koudo_chiku_ja       || '—',
     };
 
-    // ハザード情報の抽出（featuresが空＝区域外）
+    // ハザード情報（featuresが空またはundefined＝区域外として安全に処理）
+    function hazardVal(data, valueFn, level) {
+      try {
+        if (!data || !data.features || data.features.length === 0) return { value: '区域外', level: 'safe' };
+        return { value: valueFn(data.features[0].properties) || '区域内', level };
+      } catch(e) {
+        return { value: '区域外', level: 'safe' };
+      }
+    }
+
     const parsedHazard = {
-      洪水浸水想定:     flood.features?.length    ? { value: flood.features[0].properties?.scale    || '区域内', level: 'warn' }   : { value: '区域外', level: 'safe' },
-      高潮浸水想定:     highTide.features?.length ? { value: highTide.features[0].properties?.scale  || '区域内', level: 'warn' }  : { value: '区域外', level: 'safe' },
-      津波浸水想定:     tsunami.features?.length  ? { value: tsunami.features[0].properties?.scale   || '区域内', level: 'warn' }  : { value: '区域外', level: 'safe' },
-      土砂災害警戒区域: sediment.features?.length ? { value: sediment.features[0].properties?.saigai_kubun_name || '区域内', level: 'danger' } : { value: '区域外', level: 'safe' },
-      液状化リスク:     liquid.features?.length   ? { value: liquid.features[0].properties?.name    || '要確認',  level: 'warn' }  : { value: 'データなし', level: 'safe' },
+      洪水浸水想定:     hazardVal(flood,    p => p.A31a_201 ? `${p.A31a_201}〜${p.A31a_202}` : p.maximum_scale_chogoku, 'warn'),
+      高潮浸水想定:     hazardVal(highTide, p => p.scale || p.A31a_201, 'warn'),
+      津波浸水想定:     hazardVal(tsunami,  p => p.A40_003 ? `〜${p.A40_003}` : '区域内', 'warn'),
+      土砂災害警戒区域: hazardVal(sediment, p => p.A33_007 ? `${p.A33_006} ${p.A33_007}` : '区域内', 'danger'),
+      液状化リスク:     hazardVal(liquid,   p => p.topographic_classification_name_ja || p.note, 'warn'),
     };
 
     renderResults({ zoning: parsedZoning, hazard: parsedHazard }, currentLat, currentLng, false);
