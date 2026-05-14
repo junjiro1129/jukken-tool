@@ -534,30 +534,31 @@ async function fetchInfo() {
       fetch(`${PROXY_URL}?api=XKT025&z=${z}&x=${x}&y=${y}`),
     ]);
 
+    // ← highTideRes の二重読み込みを修正（floodRes→flood, highTideRes→highTide の順に正しく対応）
     const [zoning, fire, flood, highTide, tsunami, sediment, liquid] = await Promise.all([
-      zoningRes.json(), fireRes.json(), highTideRes.json(),
-      tsunamiRes.json(), highTideRes.json(), sedimentRes.json(), liquidRes.json()
+      zoningRes.json(), fireRes.json(), floodRes.json(),
+      highTideRes.json(), tsunamiRes.json(), sedimentRes.json(), liquidRes.json()
     ]);
 
-    // 用途地域の抽出
+    // 用途地域の抽出（APIドキュメント準拠のプロパティ名）
     const zoningFeature = zoning.features?.[0]?.properties || {};
     const fireFeature   = fire.features?.[0]?.properties || {};
 
     const parsedZoning = {
-      用途地域: zoningFeature.youto || zoningFeature.NAME || '都市計画区域外',
-      建蔽率:   zoningFeature.buildingCoverageRate ? zoningFeature.buildingCoverageRate + '%' : '—',
-      容積率:   zoningFeature.floorAreaRate        ? zoningFeature.floorAreaRate + '%'        : '—',
-      防火指定: fireFeature.NAME || fireFeature.bouka || '指定なし',
-      高度地区: zoningFeature.koudo || '—',
+      用途地域: zoningFeature.use_area_ja || '都市計画区域外',
+      建蔽率:   zoningFeature.u_building_coverage_ratio_ja || '—',
+      容積率:   zoningFeature.u_floor_area_ratio_ja        || '—',
+      防火指定: fireFeature.use_area_ja || '指定なし',
+      高度地区: zoningFeature.koudo_chiku_ja || '—',
     };
 
     // ハザード情報の抽出（featuresが空＝区域外）
     const parsedHazard = {
-      洪水浸水想定:         flood.features?.length    ? { value: flood.features[0].properties?.depth || '区域内', level: 'warn' }   : { value: '区域外', level: 'safe' },
-      高潮浸水想定:         highTide.features?.length ? { value: '区域内', level: 'warn' }                                           : { value: '区域外', level: 'safe' },
-      津波浸水想定:         tsunami.features?.length  ? { value: '区域内', level: 'warn' }                                           : { value: '区域外', level: 'safe' },
-      土砂災害警戒区域:     sediment.features?.length ? { value: sediment.features[0].properties?.NAME || '区域内', level: 'danger' } : { value: '区域外', level: 'safe' },
-      液状化リスク:         liquid.features?.length   ? { value: liquid.features[0].properties?.NAME  || '要確認', level: 'warn' }   : { value: 'データなし', level: 'safe' },
+      洪水浸水想定:     flood.features?.length    ? { value: flood.features[0].properties?.scale    || '区域内', level: 'warn' }   : { value: '区域外', level: 'safe' },
+      高潮浸水想定:     highTide.features?.length ? { value: highTide.features[0].properties?.scale  || '区域内', level: 'warn' }  : { value: '区域外', level: 'safe' },
+      津波浸水想定:     tsunami.features?.length  ? { value: tsunami.features[0].properties?.scale   || '区域内', level: 'warn' }  : { value: '区域外', level: 'safe' },
+      土砂災害警戒区域: sediment.features?.length ? { value: sediment.features[0].properties?.saigai_kubun_name || '区域内', level: 'danger' } : { value: '区域外', level: 'safe' },
+      液状化リスク:     liquid.features?.length   ? { value: liquid.features[0].properties?.name    || '要確認',  level: 'warn' }  : { value: 'データなし', level: 'safe' },
     };
 
     renderResults({ zoning: parsedZoning, hazard: parsedHazard }, currentLat, currentLng, false);
