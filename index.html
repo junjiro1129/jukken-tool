@@ -156,12 +156,15 @@
   .map-outer {
     position: relative;
     width: 100%;
-    height: 360px;
+    height: 500px;
     border: 0.5px solid var(--border);
     border-radius: var(--radius-lg);
     overflow: hidden;
     background: #e8e4db;
     margin-bottom: 10px;
+  }
+  @media (max-width: 560px) {
+    .map-outer { height: 280px; }
   }
   #map { width: 100%; height: 100%; }
 
@@ -356,11 +359,7 @@
 
 <div class="container">
 
-  <!-- API注意書き -->
-  <div class="api-note" id="api-note">
-    ⚠️ <strong>APIキー未設定のため、現在はデモデータを表示しています。</strong><br>
-    実データを取得するには、<a href="https://www.reinfolib.mlit.go.jp/api/request/" target="_blank">不動産情報ライブラリ（国土交通省）</a>でAPIキーを申請し、このファイルの <code>REINFOLIB_API_KEY</code> を設定してください。（無料・5営業日）
-  </div>
+  <!-- データ取得中はここに結果が表示されます -->
 
   <!-- STEP 1: 物件位置の特定 -->
   <div class="card">
@@ -422,7 +421,7 @@
 <script>
 
 /* ===== 設定 ===== */
-const REINFOLIB_API_KEY = '26cf38ab043e413bbaf60eaf56ee378e';  // ← ここに不動産情報ライブラリのAPIキーを設定
+const PROXY_URL = 'https://reinfolib-proxy.junjiro1129.workers.dev';
 
 /* ===== 地図初期化 ===== */
 let map;
@@ -515,21 +514,56 @@ async function fetchInfo() {
   const x = lng2tile(currentLng, z);
   const y = lat2tile(currentLat, z);
 
-  if (!REINFOLIB_API_KEY) {
-    await delay(800);
-    renderResults(getMockData(), currentLat, currentLng, true);
-  } else {
-    try {
-      const headers = { 'Ocp-Apim-Subscription-Key': REINFOLIB_API_KEY };
-      const [zoningRes, hazardRes] = await Promise.all([
-        fetch(`https://api.reinfolib.mlit.go.jp/ex-api/external/XKT001?response_format=geojson&z=${z}&x=${x}&y=${y}`, { headers }),
-        fetch(`https://api.reinfolib.mlit.go.jp/ex-api/external/XKT002?response_format=geojson&z=${z}&x=${x}&y=${y}`, { headers })
-      ]);
-      const [zoning, hazard] = await Promise.all([zoningRes.json(), hazardRes.json()]);
-      renderResults({ zoning, hazard }, currentLat, currentLng, false);
-    } catch(e) {
-      area.innerHTML = `<div class="card"><div class="err-msg">⚠️ API取得中にエラーが発生しました。APIキーとネットワーク接続を確認してください。<br>${e}</div></div>`;
-    }
+  try {
+    // Worker経由で複数APIを並列取得
+    const [
+      zoningRes,      // XKT002: 用途地域
+      fireRes,        // XKT014: 防火・準防火地域
+      floodRes,       // XKT026: 洪水浸水想定
+      highTideRes,    // XKT027: 高潮浸水想定
+      tsunamiRes,     // XKT028: 津波浸水想定
+      sedimentRes,    // XKT029: 土砂災害警戒区域
+      liquidRes,      // XKT025: 液状化
+    ] = await Promise.all([
+      fetch(`${PROXY_URL}?api=XKT002&z=${z}&x=${x}&y=${y}`),
+      fetch(`${PROXY_URL}?api=XKT014&z=${z}&x=${x}&y=${y}`),
+      fetch(`${PROXY_URL}?api=XKT026&z=${z}&x=${x}&y=${y}`),
+      fetch(`${PROXY_URL}?api=XKT027&z=${z}&x=${x}&y=${y}`),
+      fetch(`${PROXY_URL}?api=XKT028&z=${z}&x=${x}&y=${y}`),
+      fetch(`${PROXY_URL}?api=XKT029&z=${z}&x=${x}&y=${y}`),
+      fetch(`${PROXY_URL}?api=XKT025&z=${z}&x=${x}&y=${y}`),
+    ]);
+
+    const [zoning, fire, flood, highTide, tsunami, sediment, liquid] = await Promise.all([
+      zoningRes.json(), fireRes.json(), highTideRes.json(),
+      tsunamiRes.json(), highTideRes.json(), sedimentRes.json(), liquidRes.json()
+    ]);
+
+    // 用途地域の抽出
+    const zoningFeature = zoning.features?.[0]?.properties || {};
+    const fireFeature   = fire.features?.[0]?.properties || {};
+
+    const parsedZoning = {
+      用途地域: zoningFeature.youto || zoningFeature.NAME || '都市計画区域外',
+      建蔽率:   zoningFeature.buildingCoverageRate ? zoningFeature.buildingCoverageRate + '%' : '—',
+      容積率:   zoningFeature.floorAreaRate        ? zoningFeature.floorAreaRate + '%'        : '—',
+      防火指定: fireFeature.NAME || fireFeature.bouka || '指定なし',
+      高度地区: zoningFeature.koudo || '—',
+    };
+
+    // ハザード情報の抽出（featuresが空＝区域外）
+    const parsedHazard = {
+      洪水浸水想定:         flood.features?.length    ? { value: flood.features[0].properties?.depth || '区域内', level: 'warn' }   : { value: '区域外', level: 'safe' },
+      高潮浸水想定:         highTide.features?.length ? { value: '区域内', level: 'warn' }                                           : { value: '区域外', level: 'safe' },
+      津波浸水想定:         tsunami.features?.length  ? { value: '区域内', level: 'warn' }                                           : { value: '区域外', level: 'safe' },
+      土砂災害警戒区域:     sediment.features?.length ? { value: sediment.features[0].properties?.NAME || '区域内', level: 'danger' } : { value: '区域外', level: 'safe' },
+      液状化リスク:         liquid.features?.length   ? { value: liquid.features[0].properties?.NAME  || '要確認', level: 'warn' }   : { value: 'データなし', level: 'safe' },
+    };
+
+    renderResults({ zoning: parsedZoning, hazard: parsedHazard }, currentLat, currentLng, false);
+
+  } catch(e) {
+    area.innerHTML = `<div class="card"><div class="err-msg">⚠️ API取得中にエラーが発生しました。時間をおいて再試行してください。<br><small>${e}</small></div></div>`;
   }
 
   resetBtn(btn,
