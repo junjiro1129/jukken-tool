@@ -534,11 +534,19 @@ async function fetchInfo() {
       fetch(`${PROXY_URL}?api=XKT025&z=${z}&x=${x}&y=${y}`),
     ]);
 
-    // ← highTideRes の二重読み込みを修正（floodRes→flood, highTideRes→highTide の順に正しく対応）
     const [zoning, fire, flood, highTide, tsunami, sediment, liquid] = await Promise.all([
       zoningRes.json(), fireRes.json(), floodRes.json(),
       highTideRes.json(), tsunamiRes.json(), sedimentRes.json(), liquidRes.json()
     ]);
+
+    // デバッグ：実際のAPIレスポンスをコンソールに出力
+    console.log('XKT002 用途地域:', JSON.stringify(zoning?.features?.[0]?.properties));
+    console.log('XKT014 防火地域:', JSON.stringify(fire?.features?.[0]?.properties));
+    console.log('XKT026 洪水:', JSON.stringify(flood?.features?.[0]?.properties));
+    console.log('XKT027 高潮:', JSON.stringify(highTide?.features?.[0]?.properties));
+    console.log('XKT028 津波:', JSON.stringify(tsunami?.features?.[0]?.properties));
+    console.log('XKT029 土砂:', JSON.stringify(sediment?.features?.[0]?.properties));
+    console.log('XKT025 液状化:', JSON.stringify(liquid?.features?.[0]?.properties));
 
     // 用途地域の抽出（APIドキュメント準拠のプロパティ名）
     const zoningFeature = zoning.features?.[0]?.properties || {};
