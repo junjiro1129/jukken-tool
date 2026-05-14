@@ -607,17 +607,22 @@ function renderResults(data, lat, lng, isMock) {
   const zoningText = `本物件は都市計画法に基づき${z['用途地域']}に指定されており、建蔽率${z['建蔽率']}・容積率${z['容積率']}の制限を受ける。防火上の指定は${z['防火指定']}である。`;
 
   const hazardLines = [];
-  if (h['洪水浸水想定'].level !== 'safe')
-    hazardLines.push(`洪水浸水想定区域（想定最大規模）において浸水深${h['洪水浸水想定'].value}の区域に含まれる`);
-  if (h['内水氾濫'].level !== 'safe')
-    hazardLines.push(`内水氾濫想定において${h['内水氾濫'].value}の区域に含まれる`);
-  if (h['液状化リスク'].level !== 'safe')
-    hazardLines.push(`液状化リスクは「${h['液状化リスク'].value}」地形区分に該当する`);
+  if (h['洪水浸水想定']?.level !== 'safe')
+    hazardLines.push(`洪水浸水想定区域（想定最大規模）において浸水深${h['洪水浸水想定']?.value}の区域に含まれる`);
+  if (h['高潮浸水想定']?.level !== 'safe')
+    hazardLines.push(`高潮浸水想定区域において${h['高潮浸水想定']?.value}の区域に含まれる`);
+  if (h['津波浸水想定']?.level !== 'safe')
+    hazardLines.push(`津波浸水想定区域において${h['津波浸水想定']?.value}の区域に含まれる`);
+  if (h['土砂災害警戒区域']?.level !== 'safe')
+    hazardLines.push(`土砂災害警戒区域（${h['土砂災害警戒区域']?.value}）に該当する`);
+  if (h['液状化リスク']?.level !== 'safe')
+    hazardLines.push(`液状化リスクは「${h['液状化リスク']?.value}」地形区分に該当する`);
 
   const safeItems = [];
-  if (h['土砂災害警戒区域'].level === 'safe') safeItems.push('土砂災害警戒区域');
-  if (h['津波浸水想定'].level === 'safe') safeItems.push('津波浸水想定区域');
-  if (h['高潮浸水想定'].level === 'safe') safeItems.push('高潮浸水想定区域');
+  if (h['洪水浸水想定']?.level === 'safe') safeItems.push('洪水浸水想定区域');
+  if (h['土砂災害警戒区域']?.level === 'safe') safeItems.push('土砂災害警戒区域');
+  if (h['津波浸水想定']?.level === 'safe') safeItems.push('津波浸水想定区域');
+  if (h['高潮浸水想定']?.level === 'safe') safeItems.push('高潮浸水想定区域');
 
   const hazardText = (hazardLines.length > 0 ? hazardLines.join('。') + '。' : '') +
     (safeItems.length > 0 ? `${safeItems.join('・')}には含まれない。` : '');
