@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>重説補助ツール — 物件情報自動取得</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --bg-sub: #f7f6f3;
+    --bg-ter: #f0ede8;
+    --text: #1a1a18;
+    --text-sub: #6b6b65;
+    --text-ter: #a0a09a;
+    --border: rgba(0,0,0,0.12);
+    --border-em: rgba(0,0,0,0.22);
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --teal: #0F6E56;
+    --teal-light: #E1F5EE;
+    --amber: #854F0B;
+    --amber-light: #FAEEDA;
+    --red: #A32D2D;
+    --red-light: #FCEBEB;
+    --coral: #D85A30;
+  }
+
+  body {
+    font-family: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif;
+    background: var(--bg-ter);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  header {
+    background: var(--bg);
+    border-bottom: 0.5px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  header .logo {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  header .logo span { color: var(--teal); }
+  header .badge {
+    font-size: 11px;
+    background: var(--teal-light);
+    color: var(--teal);
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+
+  .container {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+
+  .card {
+    background: var(--bg);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    margin-bottom: 14px;
+  }
+  .card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-sub);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .card-title svg { flex-shrink: 0; }
+
+  /* ── 入力行 ── */
+  .input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .input-row input[type="text"] {
+    flex: 1;
+    height: 40px;
+    padding: 0 14px;
+    border: 0.5px solid var(--border-em);
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--bg);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input-row input[type="text"]:focus {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px rgba(15,110,86,0.1);
+  }
+  .input-row input::placeholder { color: var(--text-ter); }
+
+  .btn {
+    height: 40px;
+    padding: 0 18px;
+    border: 0.5px solid var(--border-em);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .btn:hover { background: var(--bg-sub); }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn.primary {
+    background: var(--teal);
+    color: #fff;
+    border-color: var(--teal);
+    font-weight: 500;
+  }
+  .btn.primary:hover { background: #0d5f4a; }
+  .btn.icon-only { width: 40px; padding: 0; justify-content: center; }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-ter);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  /* ── 地図 ── */
+  .map-outer {
+    position: relative;
+    width: 100%;
+    height: 500px;
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: #e8e4db;
+    margin-bottom: 10px;
+  }
+  @media (max-width: 560px) {
+    .map-outer { height: 280px; }
+  }
+  #map { width: 100%; height: 100%; }
+
+  .crosshair {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 500;
+    width: 30px; height: 30px;
+  }
+  .crosshair::before, .crosshair::after {
+    content: '';
+    position: absolute;
+    background: var(--coral);
+  }
+  .crosshair::before { width: 1.5px; height: 30px; top: 0; left: 14.25px; }
+  .crosshair::after  { width: 30px; height: 1.5px; top: 14.25px; left: 0; }
+  .crosshair-dot {
+    position: absolute;
+    width: 7px; height: 7px;
+    background: var(--coral);
+    border-radius: 50%;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+  }
+
+  .map-label {
+    position: absolute;
+    bottom: 10px; left: 10px;
+    background: rgba(255,255,255,0.92);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 6px 10px;
+    font-size: 12px;
+    color: var(--text-sub);
+    z-index: 500;
+    max-width: 300px;
+    backdrop-filter: blur(4px);
+  }
+  .map-label b { color: var(--text); }
+
+  .map-tip {
+    position: absolute;
+    top: 10px; right: 10px;
+    background: rgba(255,255,255,0.88);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--text-sub);
+    z-index: 500;
+    backdrop-filter: blur(4px);
+  }
+
+  /* ── 座標確認行 ── */
+  .coord-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 0;
+  }
+  .coord-pill {
+    flex: 1;
+    background: var(--bg-sub);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    font-size: 12px;
+    color: var(--text-sub);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Courier New', monospace;
+  }
+  .coord-pill .cl { font-family: inherit; color: var(--text-ter); font-size: 11px; }
+
+  /* ── 結果エリア ── */
+  .result-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  @media (max-width: 560px) { .result-grid { grid-template-columns: 1fr; } }
+
+  .result-item {
+    background: var(--bg-sub);
+    border-radius: var(--radius-md);
+    padding: 10px 13px;
+  }
+  .result-item.full { grid-column: span 2; }
+  @media (max-width: 560px) { .result-item.full { grid-column: span 1; } }
+
+  .r-label {
+    font-size: 11px;
+    color: var(--text-ter);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .r-value {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .r-value.safe  { color: var(--teal); }
+  .r-value.warn  { color: var(--amber); }
+  .r-value.danger { color: var(--red); }
+
+  .section-sep {
+    grid-column: span 2;
+    font-size: 11px;
+    color: var(--text-ter);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding-top: 12px;
+    border-top: 0.5px solid var(--border);
+    margin-top: 4px;
+  }
+  @media (max-width: 560px) { .section-sep { grid-column: span 1; } }
+
+  .generated-text-box {
+    background: var(--bg);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    font-size: 13px;
+    line-height: 1.9;
+    color: var(--text);
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+  }
+
+  .spinner {
+    width: 15px; height: 15px;
+    border: 1.5px solid var(--border);
+    border-top-color: var(--teal);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-msg {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 20px 0;
+    font-size: 13px;
+    color: var(--text-sub);
+  }
+
+  .err-msg {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--red);
+    padding: 10px 0;
+  }
+
+  .api-note {
+    background: var(--amber-light);
+    border: 0.5px solid #FAC775;
+    border-radius: var(--radius-md);
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--amber);
+    margin-bottom: 14px;
+    line-height: 1.7;
+  }
+  .api-note a { color: var(--amber); }
+
+  footer {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-ter);
+    padding: 24px 0 12px;
+  }
+
+  /* Leaflet上書き */
+  .leaflet-control-attribution { font-size: 10px !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">重説<span>補助</span>ツール</div>
+  <div class="badge">無料 / β版</div>
+</header>
+
+<div class="container">
+
+  <!-- データ取得中はここに結果が表示されます -->
+
+  <!-- STEP 1: 物件位置の特定 -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+      Step 1 — 物件の所在地を特定
+    </div>
+
+    <div class="input-row">
+      <input type="text" id="addr-input" placeholder="住所を入力（例：広島市中区紙屋町1丁目1番）" />
+      <button class="btn primary" id="geocode-btn" onclick="geocode()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        検索
+      </button>
+      <button class="btn icon-only" id="gps-btn" onclick="getGPS()" title="現在地を取得">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+      </button>
+    </div>
+
+    <p class="hint">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      住所で大まかに移動し、地図をドラッグして物件敷地に照準を合わせてください
+    </p>
+
+    <div class="map-outer">
+      <div id="map"></div>
+      <div class="crosshair"><div class="crosshair-dot"></div></div>
+      <div class="map-label" id="map-label">地図をドラッグして物件位置に合わせてください</div>
+      <div class="map-tip">ドラッグで微調整</div>
+    </div>
+
+    <div class="coord-row">
+      <div class="coord-pill">
+        <span class="cl">緯度</span>
+        <span id="lat-out">—</span>
+      </div>
+      <div class="coord-pill">
+        <span class="cl">経度</span>
+        <span id="lng-out">—</span>
+      </div>
+      <button class="btn primary" id="fetch-btn" onclick="fetchInfo()" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        公的情報を取得
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 2: 取得結果 -->
+  <div id="result-area"></div>
+
+  <!-- STEP 3: 登記情報アップロード -->
+  <div class="card">
+    <div class="card-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Step 3 — 登記情報を読み込む（任意）
+    </div>
+    <p class="hint">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      登記情報提供サービスの「全部事項」PDF（土地・建物・区分建物）に対応。図面・公図には非対応。データは端末内で処理され、外部送信されません。
+    </p>
+    <div id="drop-zone" style="border:1.5px dashed var(--border-em);border-radius:var(--radius-md);padding:28px 16px;text-align:center;cursor:pointer;transition:background 0.15s;">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--text-ter)" stroke-width="1.5" style="margin-bottom:8px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <div style="font-size:14px;color:var(--text);font-weight:500;margin-bottom:2px">登記情報PDFをドラッグ＆ドロップ</div>
+      <div style="font-size:12px;color:var(--text-ter)">またはクリックして選択（建物・土地の全部事項証明）</div>
+      <input type="file" id="pdf-input" accept="application/pdf" style="display:none" />
+    </div>
+    <div id="touki-result"></div>
+  </div>
+
+</div>
+
+<footer>
+  データソース：不動産情報ライブラリ（国土交通省）／国土地理院 ／ OpenStreetMap contributors<br>
+  本ツールは重要事項説明書作成の補助を目的とするものです。宅建士による最終確認が必要です。
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (window['pdfjsLib']) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
+<script>
+
+/* ===== 設定 ===== */
+const PROXY_URL = 'https://reinfolib-proxy.junjiro1129.workers.dev';
+
+/* ===== 地図初期化 ===== */
+let map;
+let currentLat = null, currentLng = null;
+const DEFAULT_LAT = 34.3954, DEFAULT_LNG = 132.4596; // 広島市中区
+
+function initMap(lat, lng) {
+  if (map) {
+    map.setView([lat, lng], 17);
+    return;
+  }
+  map = L.map('map', { zoomControl: true }).setView([lat, lng], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }).addTo(map);
+  map.on('move', onMapMove);
+  map.on('moveend', onMapMoveEnd);
+}
+
+function onMapMove() {
+  const c = map.getCenter();
+  document.getElementById('lat-out').textContent = c.lat.toFixed(6);
+  document.getElementById('lng-out').textContent = c.lng.toFixed(6);
+}
+
+function onMapMoveEnd() {
+  const c = map.getCenter();
+  currentLat = parseFloat(c.lat.toFixed(6));
+  currentLng = parseFloat(c.lng.toFixed(6));
+  document.getElementById('fetch-btn').disabled = false;
+  document.getElementById('map-label').innerHTML =
+    `座標確定：<b>${currentLat}, ${currentLng}</b>　「公的情報を取得」を押してください`;
+  document.getElementById('result-area').innerHTML = '';
+}
+
+/* ===== 住所検索 ===== */
+async function geocode() {
+  const q = document.getElementById('addr-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('geocode-btn');
+  setLoading(btn, '検索中…');
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ' 日本')}&format=json&limit=1&accept-language=ja`,
+      { headers: { 'Accept-Language': 'ja' } }
+    );
+    const data = await res.json();
+    if (!data || data.length === 0) { showErrInline('住所が見つかりませんでした。別の表記でお試しください。'); return; }
+    const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+    initMap(lat, lng);
+    map.setView([lat, lng], 17);
+  } catch(e) {
+    showErrInline('通信エラーが発生しました。ネットワーク接続をご確認ください。');
+  } finally {
+    resetBtn(btn,
+      `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>検索`
+    );
+  }
+}
+
+/* ===== GPS取得 ===== */
+function getGPS() {
+  if (!navigator.geolocation) { alert('このブラウザでは位置情報を利用できません。'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => { initMap(pos.coords.latitude, pos.coords.longitude); map.setView([pos.coords.latitude, pos.coords.longitude], 17); },
+    () => alert('位置情報の取得が許可されていません。')
+  );
+}
+
+/* ===== Enterキーで検索 ===== */
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('addr-input').addEventListener('keydown', e => { if (e.key === 'Enter') geocode(); });
+  initMap(DEFAULT_LAT, DEFAULT_LNG);
+});
+
+/* ===== タイル座標変換 ===== */
+function lng2tile(lng, z) { return Math.floor((lng + 180) / 360 * Math.pow(2, z)); }
+function lat2tile(lat, z) { return Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z)); }
+
+/* ===== APIから安全にfeatures[0].propertiesを取得 ===== */
+/* ===== point-in-polygon 判定（GeoJSON座標は[lng,lat]順） ===== */
+function pointInRing(lng, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function pointInGeometry(lng, lat, geom) {
+  if (!geom) return false;
+  if (geom.type === 'Polygon') {
+    if (!pointInRing(lng, lat, geom.coordinates[0])) return false;
+    for (let k = 1; k < geom.coordinates.length; k++)
+      if (pointInRing(lng, lat, geom.coordinates[k])) return false;
+    return true;
+  }
+  if (geom.type === 'MultiPolygon') {
+    for (const poly of geom.coordinates) {
+      if (pointInRing(lng, lat, poly[0])) {
+        let inHole = false;
+        for (let k = 1; k < poly.length; k++)
+          if (pointInRing(lng, lat, poly[k])) { inHole = true; break; }
+        if (!inHole) return true;
+      }
+    }
+    return false;
+  }
+  return false;
+}
+
+/* ===== APIを叩き、照準座標を含むポリゴンのpropertiesを返す =====
+   タイルAPIはタイル内の全ポリゴンを返すため、features[0]ではなく
+   実際に照準点を含むポリゴンを選ぶ必要がある */
+async function safeApiCall(apiId, z, x, y, lng, lat) {
+  try {
+    const res = await fetch(`${PROXY_URL}?api=${apiId}&z=${z}&x=${x}&y=${y}`);
+    const json = await res.json();
+    if (json && Array.isArray(json.features) && json.features.length > 0) {
+      // 照準点を含むポリゴンを優先
+      for (const f of json.features) {
+        if (f.geometry && pointInGeometry(lng, lat, f.geometry)) {
+          if (apiId === 'XKT002') console.log(`[${apiId}] ${json.features.length}件中、照準を含むポリゴンを選択:`, f.properties?.use_area_ja);
+          return f.properties || {};
+        }
+      }
+      if (apiId === 'XKT002') console.log(`[${apiId}] ${json.features.length}件あるが照準を含むポリゴンなし→区域外扱い`);
+      // どのポリゴンにも含まれない場合はnull（その地点は区域外）
+      return null;
+    }
+  } catch(e) {}
+  return null;
+}
+
+function hazardResult(props, valueFn, level) {
+  if (!props) return { value: '区域外', level: 'safe' };
+  try {
+    const v = valueFn(props);
+    return { value: v || '区域内', level };
+  } catch(e) {
+    return { value: '区域内', level };
+  }
+}
+
+/* ===== 公的情報取得 ===== */
+async function fetchInfo() {
+  if (!currentLat || !currentLng) return;
+  const btn = document.getElementById('fetch-btn');
+  setLoading(btn, '取得中…');
+  const area = document.getElementById('result-area');
+  area.innerHTML = `<div class="card"><div class="loading-msg"><div class="spinner"></div>不動産情報ライブラリAPIに接続中…</div></div>`;
+
+  const z = 16;
+  const x = lng2tile(currentLng, z);
+  const y = lat2tile(currentLat, z);
+  const lng = currentLng, lat = currentLat;
+
+  try {
+    // 7本のAPIを並列取得（照準座標を含むポリゴンを選択）
+    const [zoning, fire, flood, highTide, tsunami, sediment, liquid] = await Promise.all([
+      safeApiCall('XKT002', z, x, y, lng, lat), // 用途地域
+      safeApiCall('XKT014', z, x, y, lng, lat), // 防火地域
+      safeApiCall('XKT026', z, x, y, lng, lat), // 洪水
+      safeApiCall('XKT027', z, x, y, lng, lat), // 高潮
+      safeApiCall('XKT028', z, x, y, lng, lat), // 津波
+      safeApiCall('XKT029', z, x, y, lng, lat), // 土砂災害
+      safeApiCall('XKT025', z, x, y, lng, lat), // 液状化
+    ]);
+
+    const parsedZoning = {
+      用途地域: zoning?.use_area_ja                    || '都市計画区域外',
+      建蔽率:   zoning?.u_building_coverage_ratio_ja   || '—',
+      容積率:   zoning?.u_floor_area_ratio_ja          || '—',
+      防火指定: fire?.fire_prevention_on_ja            || '指定なし',
+      高度地区: zoning?.koudo_chiku_ja                 || '—',
+    };
+
+    const parsedHazard = {
+      洪水浸水想定:     hazardResult(flood,    p => p.A31a_201 ? `${p.A31a_201}〜${p.A31a_202}` : p.maximum_scale_chogoku, 'warn'),
+      高潮浸水想定:     hazardResult(highTide, p => p.scale || p.A31a_201, 'warn'),
+      津波浸水想定:     hazardResult(tsunami,  p => p.A40_003 ? `〜${p.A40_003}m` : '区域内', 'warn'),
+      土砂災害警戒区域: hazardResult(sediment, p => p.A33_007 ? `${p.A33_005}（${p.A33_007}）` : '区域内', 'danger'),
+      液状化リスク:     hazardResult(liquid,   p => p.topographic_classification_name_ja || p.note, 'warn'),
+    };
+
+    renderResults({ zoning: parsedZoning, hazard: parsedHazard }, currentLat, currentLng, false);
+
+  } catch(e) {
+    area.innerHTML = `<div class="card"><div class="err-msg">⚠️ 予期しないエラーが発生しました。<br><small>${e}</small></div></div>`;
+  }
+
+  resetBtn(btn,
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>公的情報を取得`
+  );
+}
+
+/* ===== モックデータ ===== */
+function getMockData() {
+  return {
+    zoning: {
+      用途地域: '第一種住居地域',
+      建蔽率: '60%',
+      容積率: '200%',
+      防火指定: '準防火地域',
+      高度地区: '第三種高度地区',
+      地区計画: 'なし'
+    },
+    hazard: {
+      洪水浸水想定: { value: '0.5m〜3m未満', level: 'warn' },
+      内水氾濫: { value: '0.5m未満', level: 'warn' },
+      土砂災害警戒区域: { value: '区域外', level: 'safe' },
+      土砂災害特別警戒区域: { value: '区域外', level: 'safe' },
+      津波浸水想定: { value: '区域外', level: 'safe' },
+      高潮浸水想定: { value: '区域外', level: 'safe' },
+      液状化リスク: { value: '発生しやすい', level: 'warn' }
+    }
+  };
+}
+
+/* ===== 結果レンダリング ===== */
+function renderResults(data, lat, lng, isMock) {
+  const z = data.zoning;
+  const h = data.hazard;
+
+  /* 重説記載文の自動生成 */
+  const zoningText = `本物件は都市計画法に基づき${z['用途地域']}に指定されており、建蔽率${z['建蔽率']}・容積率${z['容積率']}の制限を受ける。防火上の指定は${z['防火指定']}である。`;
+
+  const hazardLines = [];
+  if (h['洪水浸水想定']?.level !== 'safe')
+    hazardLines.push(`洪水浸水想定区域（想定最大規模）において浸水深${h['洪水浸水想定']?.value}の区域に含まれる`);
+  if (h['高潮浸水想定']?.level !== 'safe')
+    hazardLines.push(`高潮浸水想定区域において${h['高潮浸水想定']?.value}の区域に含まれる`);
+  if (h['津波浸水想定']?.level !== 'safe')
+    hazardLines.push(`津波浸水想定区域において${h['津波浸水想定']?.value}の区域に含まれる`);
+  if (h['土砂災害警戒区域']?.level !== 'safe')
+    hazardLines.push(`土砂災害警戒区域（${h['土砂災害警戒区域']?.value}）に該当する`);
+  if (h['液状化リスク']?.level !== 'safe')
+    hazardLines.push(`液状化リスクは「${h['液状化リスク']?.value}」地形区分に該当する`);
+
+  const safeItems = [];
+  if (h['洪水浸水想定']?.level === 'safe') safeItems.push('洪水浸水想定区域');
+  if (h['土砂災害警戒区域']?.level === 'safe') safeItems.push('土砂災害警戒区域');
+  if (h['津波浸水想定']?.level === 'safe') safeItems.push('津波浸水想定区域');
+  if (h['高潮浸水想定']?.level === 'safe') safeItems.push('高潮浸水想定区域');
+
+  const hazardText = (hazardLines.length > 0 ? hazardLines.join('。') + '。' : '') +
+    (safeItems.length > 0 ? `${safeItems.join('・')}には含まれない。` : '');
+
+  const generatedText = zoningText + '\n' + hazardText;
+
+  document.getElementById('result-area').innerHTML = `
+  <div class="card">
+    <div class="card-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      Step 2 — 取得結果
+      ${isMock ? '<span style="font-size:10px;font-weight:400;color:var(--text-ter);margin-left:6px">（デモデータ）</span>' : ''}
+      <span style="margin-left:auto;font-size:11px;font-weight:400;color:var(--text-ter)">${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
+    </div>
+
+    <div class="result-grid">
+      <div class="section-sep">法令上の制限（不動産情報ライブラリ API）</div>
+
+      <div class="result-item">
+        <div class="r-label">用途地域</div>
+        <div class="r-value">${z['用途地域']}</div>
+      </div>
+      <div class="result-item">
+        <div class="r-label">建蔽率 / 容積率</div>
+        <div class="r-value">${z['建蔽率']} / ${z['容積率']}</div>
+      </div>
+      <div class="result-item">
+        <div class="r-label">防火指定</div>
+        <div class="r-value">${z['防火指定']}</div>
+      </div>
+      <div class="result-item">
+        <div class="r-label">高度地区</div>
+        <div class="r-value">${z['高度地区']}</div>
+      </div>
+
+      <div class="section-sep">ハザード情報（不動産情報ライブラリ API）</div>
+
+      ${Object.entries(h).map(([label, v]) => {
+        const level = (v && v.level) ? v.level : 'safe';
+        const value = (v && v.value) ? v.value : '—';
+        return `<div class="result-item">
+        <div class="r-label">${label}</div>
+        <div class="r-value ${level}">${value}</div>
+      </div>`;
+      }).join('')}
+
+      <div class="section-sep">重説記載文（自動生成）</div>
+
+      <div class="result-item full" style="background:var(--bg)">
+        <div class="r-label" style="margin-bottom:8px">以下のテキストをコピーして重説に貼り付けてください</div>
+        <div class="generated-text-box" id="gen-text">${generatedText}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="copyText()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            テキストをコピー
+          </button>
+          <button class="btn" onclick="exportExcel()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Excelに出力（準備中）
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="background:var(--bg-sub);border-style:dashed">
+    <div class="card-title">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      登記情報の取得（要外部サービス）
+    </div>
+    <p style="font-size:13px;color:var(--text-sub);line-height:1.8;margin-bottom:12px">
+      所有者・権利関係（甲区・乙区）の情報は公開APIでは取得できません。<br>
+      以下のサービスで取得後、手動で記入してください。
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="https://www1.touki-kyoutaku-online.moj.go.jp/" target="_blank" class="btn">登記情報提供サービス（法務省）</a>
+      <a href="https://www.homes-sys.co.jp/" target="_blank" class="btn">ホームズ（API連携・有償）</a>
+      <a href="https://www.torus.co.jp/" target="_blank" class="btn">トーラス不動産レーダー（有償）</a>
+    </div>
+  </div>
+  `;
+}
+
+/* ===== コピー ===== */
+function copyText() {
+  const t = document.getElementById('gen-text');
+  if (!t) return;
+  navigator.clipboard.writeText(t.innerText).then(() => {
+    const btn = event.target.closest('button');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '✓ コピーしました';
+    setTimeout(() => { btn.innerHTML = orig; }, 2000);
+  });
+}
+
+/* ===== Excel出力（準備中） ===== */
+function exportExcel() { alert('Excel出力機能は次のバージョンで実装予定です。'); }
+
+/* ===== ユーティリティ ===== */
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+function setLoading(btn, msg) { btn.disabled = true; btn.innerHTML = `<div class="spinner"></div>${msg}`; }
+function resetBtn(btn, html) { btn.disabled = false; btn.innerHTML = html; }
+function showErrInline(msg) { document.getElementById('result-area').innerHTML = `<div class="card"><div class="err-msg">⚠️ ${msg}</div></div>`; }
+
+/* ===================================================================
+   登記情報パーサー（Pythonで検証済みロジックをJSに移植）
+   =================================================================== */
+function z2h(s) {
+  if (s == null) return s;
+  return s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+          .replace(/－/g,'-').replace(/，/g,',').replace(/．/g,'.').replace(/％/g,'%');
+}
+function cleanLine(line) {
+  return line.replace(/[┃┠┯┷━─┏┓┗┛│┼┨┤├┴┬＿]/g,' ').replace(/　/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function detectType(text) {
+  const t = text.replace(/ /g,'');
+  if (t.includes('専有部分の建物の表示') || t.includes('敷地権の表示')) return '区分建物';
+  if (t.includes('主である建物の表示') || t.includes('建物の表示')) return '建物';
+  if (t.includes('土地の表示')) return '土地';
+  return '不明';
+}
+
+function parseToukibo(raw) {
+  const lines = raw.split('\n').map(cleanLine).filter(l => l);
+  const fulltext = lines.join('\n');
+  const typ = detectType(fulltext);
+
+  // セクション分割
+  const sec = { header:[], ittou:[], shikichiMoku:[], senyu:[], shikichiken:[], kou:[], otsu:[] };
+  let cur = 'header';
+  let lastRightsSection = null; // 直前の権利部（kou/otsu）を記憶
+  for (const l of lines) {
+    const c = l.replace(/ /g,'');
+    if (c.includes('一棟の建物の表示')) { cur='ittou'; sec[cur].push(l); continue; }
+    if (c.includes('敷地権の目的である土地')) { cur='shikichiMoku'; continue; }
+    if (c.includes('専有部分の建物の表示')) { cur='senyu'; sec[cur].push(l); continue; }
+    if (c.includes('敷地権の表示')) { cur='shikichiken'; continue; }
+    if (c.includes('権利部（甲区')) { cur='kou'; lastRightsSection='kou'; continue; }
+    if (c.includes('権利部（乙区')) { cur='otsu'; lastRightsSection='otsu'; continue; }
+    // 「共同担保目録」見出し（直後に「第N号」が続かない＝セクション見出し）のみ切替
+    if (/^共同担保目録(?!第)/.test(c)) { cur='kyodo'; continue; }
+    if (/^信託目録(?!第)/.test(c)) { cur='shintaku'; continue; }
+    // 脚注（＊で始まる注記）以降は対象外
+    if (l.startsWith('＊') || l.startsWith('*')) { cur='footer'; continue; }
+    // 共同担保目録セクション内でも、順位番号＋権利キーワードの行が来たら直前の権利部に復帰
+    // （ページ送りで順位2・3等が目録の後ろに回り込むケースへの対処）
+    if (cur === 'kyodo' && lastRightsSection) {
+      const rm = l.match(/^([０-９\d]+) (.+)/);
+      if (rm && /^(抵当権|根抵当権|地上権|賃借権|地役権|所有権|[０-９\d]+番(?:抵当権|根抵当権|地上権|賃借権))/.test(rm[2].trim())) {
+        cur = lastRightsSection;
+      }
+    }
+    if (!sec[cur]) sec[cur] = [];
+    sec[cur].push(l);
+  }
+  const B = k => sec[k].join('\n');
+  const R = { _種別: typ };
+  let m;
+
+  m = fulltext.match(/不動産番号 ?([０-９\d]{10,})/); R.不動産番号 = m ? z2h(m[1]) : null;
+
+  if (typ === '区分建物') {
+    m = B('ittou').match(/所\s*在\s*(.+?番地[０-９\d]+)/); R.一棟所在 = m ? z2h(m[1]).trim() : null;
+    m = B('ittou').match(/建物の名称\s*(.+)/); R.建物名称 = m ? m[1].trim().replace(/[ 　]+$/,'') : null;
+    let b1 = B('ittou').replace(/[０-９\d]+階 [０-９\d]+[：:．.][０-９\d]+/g,'').replace(/〔.*?〕/g,'').replace(/[\n ]/g,'');
+    m = b1.match(/(鉄筋コンクリート造|鉄骨鉄筋コンクリート造|鉄骨造|木造)(陸屋根|スレート葺|瓦葺)?([０-９\d]+)階建/);
+    R.一棟構造 = m ? z2h(m[1] + (m[2]||'') + m[3] + '階建') : null;
+    m = B('senyu').match(/([一-龥]+[０-９\d]*丁目 [０-９\d]+番[０-９\d]+の[０-９\d]+)/); R.家屋番号 = m ? z2h(m[1]) : null;
+    m = B('senyu').match(/(居宅|店舗|事務所|共同住宅|車庫|倉庫)/); R.種類 = m ? m[1] : null;
+    m = B('senyu').match(/([０-９\d]+)階部分 ([０-９\d]+)[：:．.]([０-９\d]+)/); R.床面積 = m ? `${z2h(m[1])}階部分 ${z2h(m[2])}.${z2h(m[3])}㎡` : null;
+    const bt = B('shikichiMoku').replace(/\n/g,'');
+    m = bt.match(/(宅地|田|畑|山林|雑種地) +([０-９\d]+)[：:．.]([０-９\d]+)/);
+    if (m) { R.地目 = m[1]; R.地積 = `${z2h(m[2])}.${z2h(m[3])}㎡`; }
+    let bt2 = bt.replace(/(宅地|田|畑|山林|雑種地)/g,'').replace(/[０-９\d]+[：:．.][０-９\d]+/g,'')
+                .replace(/平成[０-９\d]+年[０-９\d]+月[０-９\d]+日|令和[０-９\d]+年[０-９\d]+月[０-９\d]+日/g,'').replace(/ /g,'');
+    m = bt2.match(/([一-龥]+[^ ]*?丁目[０-９\d]+番[０-９\d]+)/);
+    R.土地所在地番 = m ? z2h(m[1]) : null;
+    m = B('shikichiken').match(/(所有権|地上権|賃借権)/); R.敷地権種類 = m ? m[1] : null;
+    m = B('shikichiken').match(/([０-９\d]+万[０-９\d]+分の[０-９\d]+|[０-９\d]+分の[０-９\d]+)/); R.敷地権割合 = m ? z2h(m[1]) : null;
+  }
+
+  if (typ === '建物') {
+    const h = B('header');
+    m = h.match(/所\s*在\s*(.+?番地[０-９\d]+|.+?[０-９\d]+番地[０-９\d]+)/); R.所在 = m ? z2h(m[1]).trim() : null;
+    m = h.match(/家屋番号\s*([０-９\d]+番[０-９\d]*(?:の[０-９\d]+)?)/); R.家屋番号 = m ? z2h(m[1]).trim() : null;
+    m = h.match(/(居宅|店舗|事務所|共同住宅|車庫|倉庫)/); R.種類 = m ? m[1] : null;
+    m = h.match(/(木造|鉄筋コンクリート造|鉄骨鉄筋コンクリート造|鉄骨造)(瓦葺|スレート葺|陸屋根)?[^０-９\d]*([０-９\d]+)階建/);
+    R.構造 = m ? z2h(m[1]+(m[2]||'')+m[3]+'階建') : null;
+    const floors = [...h.matchAll(/([０-９\d]+)階 ([０-９\d]+)[：:]([０-９\d]+)/g)];
+    if (floors.length) R.床面積 = floors.map(f => `${z2h(f[1])}階 ${z2h(f[2])}.${z2h(f[3])}㎡`).join(' / ');
+  }
+
+  if (typ === '土地') {
+    const h = B('header');
+    // 所在：「① 地番」より前の範囲で、所在の後の地名を取得（丁目・番地の有無を問わない）
+    const beforeChiban = h.includes('① 地') ? h.split('① 地')[0] : h;
+    m = beforeChiban.match(/所\s*在\s*([^\uE000-\uF8FF\n]+?)(?:\s*[\uE042\uE043\uE044]|\s{2,}|\n|$)/);
+    R.所在 = m ? z2h(m[1]).trim() : null;
+    m = h.match(/([０-９\d]+番[０-９\d]*) (宅地|田|畑|山林|雑種地|原野|公衆用道路|墓地|境内地)/);
+    if (m) { R.地番 = z2h(m[1]); R.地目 = m[2]; }
+    // 地積：小数部が空（例 198：）でも整数のみ取得
+    m = h.match(/(宅地|田|畑|山林|雑種地|原野|公衆用道路|墓地|境内地) +([０-９\d]+)[：:]([０-９\d]*)/);
+    if (m) { const dec = z2h(m[3]); R.地積 = dec ? `${z2h(m[2])}.${dec}㎡` : `${z2h(m[2])}㎡`; }
+  }
+
+  // 甲区：最新順位の所有者（共有・複数所有者対応）
+  const kouEntries = []; let kce = null;
+  for (const l of B('kou').split('\n')) {
+    const mm = l.match(/^([０-９\d]+) (所有権移転|所有権保存|所有権一部移転)/);
+    if (mm) {
+      if (kce) kouEntries.push(kce);
+      kce = { num: z2h(mm[1]), 目的: mm[2], lines: [l] };
+    } else if (kce) kce.lines.push(l);
+  }
+  if (kce) kouEntries.push(kce);
+  // 移記・余白のみのエントリを除外し、最新を採用
+  const validKou = kouEntries.filter(e => !e.lines.every(x => x.includes('移記') || x.includes('法務省令') || x.includes('余 白')));
+  const latestKou = validKou.length ? validKou[validKou.length - 1] : null;
+
+  R.所有者 = [];
+  if (latestKou) {
+    const body = z2h(latestKou.lines.join(' '));
+    let mm = body.match(/原因 (.+?(?:売買|相続|贈与|競売|財産分与))/);
+    R.登記原因 = mm ? mm[1] : (body.includes('所有権保存') ? '所有権保存' : null);
+    R.甲区_目的 = latestKou.目的;
+
+    if (body.includes('共有者')) {
+      // 持分（N分のN）で区切り、直前=住所・直後=氏名
+      const parts = body.split('共有者')[1].split(/(?:持分)?([0-9]+分の[0-9]+)/);
+      let buf = parts[0];
+      for (let i = 1; i < parts.length; i += 2) {
+        const mochibun = parts[i];
+        const rest = parts[i+1] || '';
+        const addr = buf.trim().replace(/第[0-9]+号/g,'').replace(/\s+/g,' ').trim();
+        const nm = rest.match(/^\s*([一-龥ぁ-んァ-ヶ ]+?)(?= [一-龥0-9]+[市区郡町村]| 順位| 原因|$)/);
+        const name = nm ? nm[1].replace(/ /g,'').trim() : rest.split(/ 順位/)[0].replace(/ /g,'').trim();
+        R.所有者.push({ 氏名: name, 住所: addr.replace(/番地 の/g,'番地の').replace(/番 の/g,'番の'), 持分: mochibun });
+        buf = nm ? rest.slice(nm[0].length) : '';
+      }
+    } else {
+      const m2 = body.match(/所有者 (.+?(?:番地?[０-９\d]*|号)(?: ?の ?[０-９\d]+)?) ?([一-龥ぁ-んァ-ヶ]+(?: [一-龥ぁ-んァ-ヶ]+){0,3}?)(?: 順位| 余 白|原因|$)/);
+      if (m2) {
+        let addr = z2h(m2[1]).trim().replace(/第[0-9]+号/g,'').replace(/\s+/g,' ').trim();
+        addr = addr.replace(/番地 の/g,'番地の').replace(/番 の/g,'番の');
+        R.所有者.push({ 氏名: m2[2].replace(/ /g,'').trim(), 住所: addr, 持分: null });
+      }
+    }
+  }
+  // 後方互換（単独所有のとき従来フィールドも埋める）
+  if (R.所有者.length) { R.現所有者_氏名 = R.所有者[0].氏名; R.現所有者_住所 = R.所有者[0].住所; }
+
+  // 乙区：抹消判定。行頭が順位番号の行を境界にエントリ化（抹消行も独立エントリ）
+  const entries = []; let ce = null;
+  for (const l of B('otsu').split('\n')) {
+    const mm = l.match(/^([０-９\d]+) (.+)/);
+    if (mm && /^[０-９\d]+$/.test(mm[1])) {
+      if (ce) entries.push(ce);
+      ce = { num: z2h(mm[1]), purpose: mm[2].trim(), body: [] };
+    } else if (/^付記[０-９\d]+号/.test(l)) {
+      // 付記は直前エントリに従属（新エントリにしない）
+      if (ce) ce.body.push(l);
+    } else if (ce) ce.body.push(l);
+  }
+  if (ce) entries.push(ce);
+
+  const cancelled = new Set(); const active = [];
+  for (const e of entries) {
+    const p = z2h(e.purpose);
+    const mm = p.match(/(\d+)番.*?抹消/);
+    if (mm) cancelled.add(mm[1]);
+    else if (!p.includes('抹消')) active.push(e);
+  }
+  const valid = active.filter(e => !cancelled.has(e.num));
+  if (entries.length === 0) R.乙区_現在有効 = '__NONE__';        // 担保権の登記なし
+  else if (valid.length === 0) R.乙区_現在有効 = '__CANCELLED__'; // 全て抹消済
+  else R.乙区_現在有効 = valid.map(e => {
+    // 共同担保・順位・移記より前までを本文とする
+    let body = z2h([e.purpose, ...e.body].join(' '));
+    body = body.split(/共同担保|順位[０-９\d]+番の登記を移記|昭和[０-９\d]+年法務省令/)[0];
+    const amt = body.match(/債権額 (金[\d,]+万?円)/);
+    const kyodo = body.match(/極度額 (金[\d,]+万?円)/);
+    // 権利者：会社名（株式会社等）または個人名で終端
+    let holder = null;
+    const hm = body.match(/(抵当権者|根抵当権者|権利者) (.+?)(?:\s*(?:株式会社|有限会社|合同会社|信用金庫|信用組合|農業協同組合|銀行)[^ ]*|\s+[一-龥]{2,4})\s*$/);
+    if (hm) {
+      const full = body.slice(body.indexOf(hm[0]));
+      const cm = full.match(/(?:抵当権者|根抵当権者|権利者)\s*(.+?)(株式会社[^ ]*|有限会社[^ ]*|信用金庫|信用組合|銀行[^ ]*|農業協同組合)/);
+      holder = cm ? (cm[1]+cm[2]).replace(/ /g,'').replace(/（.*?）/g,'') : hm[2].replace(/ /g,'');
+    }
+    return {
+      順位: e.num,
+      目的: z2h(e.purpose).split(' ')[0],
+      債権額: amt ? amt[1] : (kyodo ? kyodo[1]+'（極度額）' : null),
+      権利者: holder
+    };
+  });
+
+  return R;
+}
+
+/* ===== PDFアップロード処理 ===== */
+(function setupUpload() {
+  const dz = document.getElementById('drop-zone');
+  const input = document.getElementById('pdf-input');
+  if (!dz) return;
+  dz.addEventListener('click', () => input.click());
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.background = 'var(--bg-sub)'; });
+  dz.addEventListener('dragleave', () => { dz.style.background = ''; });
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.style.background=''; if (e.dataTransfer.files[0]) handlePdf(e.dataTransfer.files[0]); });
+  input.addEventListener('change', e => { if (e.target.files[0]) handlePdf(e.target.files[0]); });
+})();
+
+async function handlePdf(file) {
+  const out = document.getElementById('touki-result');
+  out.innerHTML = `<div class="loading-msg" style="padding:14px 0"><div class="spinner"></div>登記情報を解析中…</div>`;
+  try {
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    let raw = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      // 行をy座標でまとめ、列のギャップをx座標で検出して空白を挿入
+      const rowsMap = {};
+      tc.items.forEach(it => {
+        if (!it.str) return;
+        const y = Math.round(it.transform[5]);
+        const x = it.transform[4];
+        const w = it.width || 0;
+        const charW = it.str.length ? w / it.str.length : 8;
+        (rowsMap[y] = rowsMap[y] || []).push({ x, w, s: it.str, charW });
+      });
+      Object.keys(rowsMap).map(Number).sort((a,b)=>b-a).forEach(y => {
+        const row = rowsMap[y].sort((a,b)=>a.x-b.x);
+        let line = '', prevEnd = null, prevCharW = 8;
+        for (const it of row) {
+          if (prevEnd !== null) {
+            const gap = it.x - prevEnd;
+            if (gap > prevCharW * 0.6) {
+              const n = Math.max(1, Math.round(gap / prevCharW));
+              line += ' '.repeat(n);
+            }
+          }
+          line += it.s;
+          prevEnd = it.x + it.w;
+          prevCharW = it.charW || prevCharW;
+        }
+        raw += line + '\n';
+      });
+    }
+    const R = parseToukibo(raw);
+    console.log('===== PDF抽出テキスト（デバッグ） =====');
+    console.log(raw);
+    console.log('===== 乙区判定 =====', JSON.stringify(R.乙区_現在有効));
+    renderToukibo(R);
+  } catch(e) {
+    out.innerHTML = `<div class="err-msg" style="padding:12px 0">⚠️ PDFの解析に失敗しました。<br><small>${e}</small></div>`;
+  }
+}
+
+function renderToukibo(R) {
+  const item = (label, val, warn) => `
+    <div class="result-item">
+      <div class="r-label">${label}</div>
+      <div class="r-value ${warn||''}" style="font-size:14px">${val || '—'}</div>
+    </div>`;
+
+  // 乙区表示
+  let otsuHtml;
+  if (R.乙区_現在有効 === '__NONE__') {
+    otsuHtml = `<div class="result-item full"><div class="r-label">担保権</div><div class="r-value safe">登記なし（抵当権等の設定なし）</div></div>`;
+  } else if (R.乙区_現在有効 === '__CANCELLED__') {
+    otsuHtml = `<div class="result-item full"><div class="r-label">現在有効な担保権</div><div class="r-value safe">なし（全て抹消済み）</div></div>`;
+  } else {
+    otsuHtml = R.乙区_現在有効.map(e => `
+      <div class="result-item full">
+        <div class="r-label">乙区 順位${e.順位}（現在有効）</div>
+        <div class="r-value danger" style="font-size:14px">${e.目的}　${e.債権額||''}　${e.権利者||''}</div>
+      </div>`).join('');
+  }
+
+  // タイプ別の表題部
+  let hyodaiHtml = '';
+  if (R._種別 === '区分建物') {
+    hyodaiHtml = `
+      <div class="section-sep">建物の表示（区分所有建物）</div>
+      ${item('一棟の所在', R.一棟所在)}
+      ${item('建物の名称', R.建物名称)}
+      ${item('一棟の構造', R.一棟構造)}
+      ${item('家屋番号', R.家屋番号)}
+      ${item('種類', R.種類)}
+      ${item('専有部分の床面積', R.床面積)}
+      ${item('不動産番号', R.不動産番号)}
+      <div class="section-sep">敷地権</div>
+      ${item('土地の所在・地番', R.土地所在地番)}
+      ${item('地目 / 地積', `${R.地目||'—'} / ${R.地積||'—'}`)}
+      ${item('敷地権の種類', R.敷地権種類)}
+      ${item('敷地権の割合', R.敷地権割合)}`;
+  } else if (R._種別 === '建物') {
+    hyodaiHtml = `
+      <div class="section-sep">建物の表示（戸建等）</div>
+      ${item('所在', R.所在)}
+      ${item('家屋番号', R.家屋番号)}
+      ${item('種類', R.種類)}
+      ${item('構造', R.構造)}
+      ${item('床面積', R.床面積)}
+      ${item('不動産番号', R.不動産番号)}`;
+  } else if (R._種別 === '土地') {
+    hyodaiHtml = `
+      <div class="section-sep">土地の表示</div>
+      ${item('所在', R.所在)}
+      ${item('地番', R.地番)}
+      ${item('地目', R.地目)}
+      ${item('地積', R.地積)}
+      ${item('不動産番号', R.不動産番号)}`;
+  } else {
+    hyodaiHtml = `<div class="section-sep">表題部</div>
+      <div class="result-item full"><div class="r-value warn">書類タイプを判別できませんでした。登記情報提供サービスの「全部事項」PDFをご利用ください。</div></div>`;
+  }
+
+  const typeBadge = { '区分建物':'区分所有建物', '建物':'建物（戸建等）', '土地':'土地' }[R._種別] || '不明';
+
+  // 所有者表示（共有対応）
+  let ownerHtml;
+  if (R.所有者 && R.所有者.length) {
+    ownerHtml = R.所有者.map((o, i) => `
+      <div class="result-item full">
+        <div class="r-label">所有者${R.所有者.length > 1 ? ` ${i+1}（共有）` : ''}${o.持分 ? `　持分 ${o.持分}` : ''}</div>
+        <div class="r-value" style="font-size:14px">${o.氏名 || '—'}　<span style="font-weight:400;color:var(--text-sub)">${o.住所 || ''}</span></div>
+      </div>`).join('');
+  } else {
+    ownerHtml = `<div class="result-item full"><div class="r-value warn">所有者を抽出できませんでした</div></div>`;
+  }
+
+  document.getElementById('touki-result').innerHTML = `
+    <div style="margin-top:14px">
+      <div style="font-size:12px;color:var(--text-sub);margin-bottom:10px">
+        判別タイプ：<span style="color:var(--teal);font-weight:600">${typeBadge}</span>
+      </div>
+      <div class="result-grid">
+        ${hyodaiHtml}
+        <div class="section-sep">権利部 甲区（所有権）${R.所有者 && R.所有者.length > 1 ? '　— 共有名義' : ''}</div>
+        ${ownerHtml}
+        ${item('登記原因', R.登記原因)}
+        <div class="section-sep">権利部 乙区（担保権）— 抹消済みを除いた現在有効分</div>
+        ${otsuHtml}
+      </div>
+      <div class="api-note" style="margin-top:14px;margin-bottom:0">
+        ⚠️ 自動抽出結果です。古い様式・特殊な権利関係では取りこぼしがあり得ます。必ず原本と照合し、宅建士が確認してください。
+      </div>
+    </div>`;
+}
+
+</script>
+</body>
+</html>
