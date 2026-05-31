@@ -577,12 +577,48 @@ async function safeApiCall(apiId, z, x, y, lng, lat) {
           return f.properties || {};
         }
       }
-      if (apiId === 'XKT002') console.log(`[${apiId}] ${json.features.length}件あるが照準を含むポリゴンなし→区域外扱い`);
-      // どのポリゴンにも含まれない場合はnull（その地点は区域外）
+      // 含むポリゴンがない場合：最も近いポリゴンを探してフォールバック判定
+      if (apiId === 'XKT002') {
+        let nearest = null, minDist = Infinity;
+        for (const f of json.features) {
+          const d = minDistToGeometry(lng, lat, f.geometry);
+          if (d < minDist) { minDist = d; nearest = f; }
+        }
+        // 度単位の距離。約0.0003度（≒30m）以内なら境界誤差とみなして採用
+        console.log(`[${apiId}] ${json.features.length}件、照準含むポリゴンなし。最寄り:`, nearest?.properties?.use_area_ja, `距離(度)≈${minDist.toFixed(6)}`);
+        if (nearest && minDist < 0.0003) {
+          console.log(`[${apiId}] 境界誤差内のため最寄りポリゴンを採用`);
+          return nearest.properties || {};
+        }
+      }
       return null;
     }
   } catch(e) {}
   return null;
+}
+
+/* 点から最寄りのポリゴン境界までの近似距離（度単位） */
+function minDistToGeometry(lng, lat, geom) {
+  if (!geom) return Infinity;
+  const rings = [];
+  if (geom.type === 'Polygon') rings.push(...geom.coordinates);
+  else if (geom.type === 'MultiPolygon') geom.coordinates.forEach(p => rings.push(...p));
+  let min = Infinity;
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length - 1; i++) {
+      const d = distToSegment(lng, lat, ring[i][0], ring[i][1], ring[i+1][0], ring[i+1][1]);
+      if (d < min) min = d;
+    }
+  }
+  return min;
+}
+function distToSegment(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx*dx + dy*dy;
+  let t = len2 ? ((px-x1)*dx + (py-y1)*dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  const cx = x1 + t*dx, cy = y1 + t*dy;
+  return Math.hypot(px-cx, py-cy);
 }
 
 function hazardResult(props, valueFn, level) {
