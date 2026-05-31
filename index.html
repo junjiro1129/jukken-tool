@@ -603,7 +603,7 @@ async function fetchInfo() {
   const area = document.getElementById('result-area');
   area.innerHTML = `<div class="card"><div class="loading-msg"><div class="spinner"></div>不動産情報ライブラリAPIに接続中…</div></div>`;
 
-  const z = 16;
+  const z = 15;
   const x = lng2tile(currentLng, z);
   const y = lat2tile(currentLat, z);
   const lng = currentLng, lat = currentLat;
