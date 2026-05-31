@@ -567,32 +567,50 @@ function pointInGeometry(lng, lat, geom) {
    実際に照準点を含むポリゴンを選ぶ必要がある */
 async function safeApiCall(apiId, z, x, y, lng, lat) {
   try {
-    const res = await fetch(`${PROXY_URL}?api=${apiId}&z=${z}&x=${x}&y=${y}`);
-    const json = await res.json();
-    if (json && Array.isArray(json.features) && json.features.length > 0) {
-      // 照準点を含むポリゴンを優先
-      for (const f of json.features) {
-        if (f.geometry && pointInGeometry(lng, lat, f.geometry)) {
-          if (apiId === 'XKT002') console.log(`[${apiId}] ${json.features.length}件中、照準を含むポリゴンを選択:`, f.properties?.use_area_ja);
-          return f.properties || {};
-        }
-      }
-      // 含むポリゴンがない場合：最も近いポリゴンを探してフォールバック判定
-      if (apiId === 'XKT002') {
-        let nearest = null, minDist = Infinity;
-        for (const f of json.features) {
-          const d = minDistToGeometry(lng, lat, f.geometry);
-          if (d < minDist) { minDist = d; nearest = f; }
-        }
-        // 度単位の距離。約0.0003度（≒30m）以内なら境界誤差とみなして採用
-        console.log(`[${apiId}] ${json.features.length}件、照準含むポリゴンなし。最寄り:`, nearest?.properties?.use_area_ja, `距離(度)≈${minDist.toFixed(6)}`);
-        if (nearest && minDist < 0.0003) {
-          console.log(`[${apiId}] 境界誤差内のため最寄りポリゴンを採用`);
-          return nearest.properties || {};
-        }
-      }
-      return null;
+    // 照準タイルとその周囲8枚（計9タイル）を並列取得し、ポリゴンを統合
+    const tiles = [];
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = -1; dy <= 1; dy++)
+        tiles.push(fetch(`${PROXY_URL}?api=${apiId}&z=${z}&x=${x+dx}&y=${y+dy}`).then(r=>r.json()).catch(()=>null));
+    const results = await Promise.all(tiles);
+
+    // 全タイルのfeaturesを統合（重複は気にせず照準判定するだけ）
+    const allFeatures = [];
+    for (const json of results) {
+      if (json && Array.isArray(json.features)) allFeatures.push(...json.features);
     }
+    if (allFeatures.length === 0) return null;
+
+    // 照準点を含むポリゴンを探す
+    for (const f of allFeatures) {
+      if (f.geometry && pointInGeometry(lng, lat, f.geometry)) {
+        if (apiId === 'XKT002') console.log(`[${apiId}] 9タイル統合${allFeatures.length}件中、照準を含むポリゴンを選択:`, f.properties?.use_area_ja);
+        return f.properties || {};
+      }
+    }
+
+    // 含むポリゴンがなければ最寄り判定（境界誤差の救済）
+    if (apiId === 'XKT002') {
+      let nearest = null, minDist = Infinity;
+      for (const f of allFeatures) {
+        const d = minDistToGeometry(lng, lat, f.geometry);
+        if (d < minDist) { minDist = d; nearest = f; }
+      }
+      console.log(`[${apiId}] 9タイル統合${allFeatures.length}件、照準含むポリゴンなし。最寄り:`, nearest?.properties?.use_area_ja, `距離(度)≈${minDist.toFixed(6)}`);
+      if (nearest && minDist < 0.0003) {
+        console.log(`[${apiId}] 境界誤差内のため最寄りポリゴンを採用`);
+        return nearest.properties || {};
+      }
+    } else {
+      // 用途地域以外も同じく最寄り救済（30m以内）
+      let nearest = null, minDist = Infinity;
+      for (const f of allFeatures) {
+        const d = minDistToGeometry(lng, lat, f.geometry);
+        if (d < minDist) { minDist = d; nearest = f; }
+      }
+      if (nearest && minDist < 0.0003) return nearest.properties || {};
+    }
+    return null;
   } catch(e) {}
   return null;
 }
