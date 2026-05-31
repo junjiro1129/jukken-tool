@@ -581,6 +581,14 @@ async function safeApiCall(apiId, z, x, y, lng, lat) {
     }
     if (allFeatures.length === 0) return null;
 
+    // デバッグ：最初のポリゴンの座標サンプルを出力（座標系確認用）
+    if (apiId === 'XKT002' && allFeatures[0]?.geometry) {
+      const g = allFeatures[0].geometry;
+      const sample = g.type === 'Polygon' ? g.coordinates[0]?.slice(0,2)
+                   : g.type === 'MultiPolygon' ? g.coordinates[0]?.[0]?.slice(0,2) : null;
+      console.log(`[${apiId}] ポリゴン座標サンプル:`, JSON.stringify(sample), '（照準:', lng, lat, '）');
+    }
+
     // 照準点を含むポリゴンを探す
     for (const f of allFeatures) {
       if (f.geometry && pointInGeometry(lng, lat, f.geometry)) {
