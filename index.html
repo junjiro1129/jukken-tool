@@ -676,21 +676,25 @@ async function fetchInfo() {
   const area = document.getElementById('result-area');
   area.innerHTML = `<div class="card"><div class="loading-msg"><div class="spinner"></div>不動産情報ライブラリAPIに接続中…</div></div>`;
 
-  const z = 15;
-  const x = lng2tile(currentLng, z);
-  const y = lat2tile(currentLat, z);
   const lng = currentLng, lat = currentLat;
+  // 用途地域・防火地域：ポリゴンがタイル境界でクリップされ内外判定が崩れるのを防ぐため
+  //   ズームを下げて大きなタイルにし、ポリゴンが丸ごと1タイルに収まるようにする
+  const zPlan = 13;
+  const xPlan = lng2tile(lng, zPlan), yPlan = lat2tile(lat, zPlan);
+  // ハザード系：従来どおりz=15
+  const zHaz = 15;
+  const xHaz = lng2tile(lng, zHaz), yHaz = lat2tile(lat, zHaz);
 
   try {
     // APIを順次取得（一斉並列だとAPI側が500を返すため、負荷を平準化）
     const sleep = ms => new Promise(s => setTimeout(s, ms));
-    const zoning   = await safeApiCall('XKT002', z, x, y, lng, lat); await sleep(120); // 用途地域
-    const fire     = await safeApiCall('XKT014', z, x, y, lng, lat); await sleep(120); // 防火地域
-    const flood    = await safeApiCall('XKT026', z, x, y, lng, lat); await sleep(120); // 洪水
-    const highTide = await safeApiCall('XKT027', z, x, y, lng, lat); await sleep(120); // 高潮
-    const tsunami  = await safeApiCall('XKT028', z, x, y, lng, lat); await sleep(120); // 津波
-    const sediment = await safeApiCall('XKT029', z, x, y, lng, lat); await sleep(120); // 土砂災害
-    const liquid   = await safeApiCall('XKT025', z, x, y, lng, lat);                   // 液状化
+    const zoning   = await safeApiCall('XKT002', zPlan, xPlan, yPlan, lng, lat); await sleep(120); // 用途地域
+    const fire     = await safeApiCall('XKT014', zPlan, xPlan, yPlan, lng, lat); await sleep(120); // 防火地域
+    const flood    = await safeApiCall('XKT026', zHaz, xHaz, yHaz, lng, lat); await sleep(120); // 洪水
+    const highTide = await safeApiCall('XKT027', zHaz, xHaz, yHaz, lng, lat); await sleep(120); // 高潮
+    const tsunami  = await safeApiCall('XKT028', zHaz, xHaz, yHaz, lng, lat); await sleep(120); // 津波
+    const sediment = await safeApiCall('XKT029', zHaz, xHaz, yHaz, lng, lat); await sleep(120); // 土砂災害
+    const liquid   = await safeApiCall('XKT025', zHaz, xHaz, yHaz, lng, lat);                   // 液状化
 
     const parsedZoning = {
       用途地域: zoning?.use_area_ja                    || '都市計画区域外',
