@@ -566,66 +566,59 @@ function pointInGeometry(lng, lat, geom) {
    タイルAPIはタイル内の全ポリゴンを返すため、features[0]ではなく
    実際に照準点を含むポリゴンを選ぶ必要がある */
 async function safeApiCall(apiId, z, x, y, lng, lat) {
-  try {
-    // 照準タイルとその周囲8枚（計9タイル）を並列取得し、ポリゴンを統合
-    const tiles = [];
-    for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 1; dy++)
-        tiles.push(fetch(`${PROXY_URL}?api=${apiId}&z=${z}&x=${x+dx}&y=${y+dy}`).then(r=>r.json()).catch(()=>null));
-    const results = await Promise.all(tiles);
-
-    // 全タイルのfeaturesを統合（重複は気にせず照準判定するだけ）
-    const allFeatures = [];
-    for (const json of results) {
-      if (json && Array.isArray(json.features)) allFeatures.push(...json.features);
+  // 1タイル取得してfeatures配列を返すヘルパー（リトライ付き）
+  async function getTile(tx, ty) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetch(`${PROXY_URL}?api=${apiId}&z=${z}&x=${tx}&y=${ty}`);
+        if (r.status === 500 || r.status === 429) { await new Promise(s=>setTimeout(s, 400)); continue; }
+        const j = await r.json();
+        return (j && Array.isArray(j.features)) ? j.features : [];
+      } catch(e) { await new Promise(s=>setTimeout(s, 300)); }
     }
-    if (allFeatures.length === 0) return null;
+    return [];
+  }
 
-    // デバッグ：ジオメトリ構造を詳しく出力（座標系・ネスト確認用）
-    if (apiId === 'XKT002' && allFeatures[0]?.geometry) {
-      const g = allFeatures[0].geometry;
-      console.log(`[${apiId}] geometry.type:`, g.type);
-      console.log(`[${apiId}] coordinates ネスト深さ確認:`, JSON.stringify(g.coordinates).slice(0, 200));
-      // 照準を含むポリゴンを総当たりで探し、何件目かを報告
-      let hitIdx = -1;
-      for (let i = 0; i < allFeatures.length; i++) {
-        if (allFeatures[i].geometry && pointInGeometry(lng, lat, allFeatures[i].geometry)) { hitIdx = i; break; }
-      }
-      console.log(`[${apiId}] 照準を含むポリゴンのindex:`, hitIdx, hitIdx>=0 ? '→'+allFeatures[hitIdx].properties?.use_area_ja : '（見つからず）');
-    }
-
-    // 照準点を含むポリゴンを探す
-    for (const f of allFeatures) {
-      if (f.geometry && pointInGeometry(lng, lat, f.geometry)) {
-        if (apiId === 'XKT002') console.log(`[${apiId}] 9タイル統合${allFeatures.length}件中、照準を含むポリゴンを選択:`, f.properties?.use_area_ja);
-        return f.properties || {};
-      }
-    }
-
-    // 含むポリゴンがなければ最寄り判定（境界誤差の救済）
-    if (apiId === 'XKT002') {
-      let nearest = null, minDist = Infinity;
-      for (const f of allFeatures) {
-        const d = minDistToGeometry(lng, lat, f.geometry);
-        if (d < minDist) { minDist = d; nearest = f; }
-      }
-      console.log(`[${apiId}] 9タイル統合${allFeatures.length}件、照準含むポリゴンなし。最寄り:`, nearest?.properties?.use_area_ja, `距離(度)≈${minDist.toFixed(6)}`);
-      if (nearest && minDist < 0.0003) {
-        console.log(`[${apiId}] 境界誤差内のため最寄りポリゴンを採用`);
-        return nearest.properties || {};
-      }
-    } else {
-      // 用途地域以外も同じく最寄り救済（30m以内）
-      let nearest = null, minDist = Infinity;
-      for (const f of allFeatures) {
-        const d = minDistToGeometry(lng, lat, f.geometry);
-        if (d < minDist) { minDist = d; nearest = f; }
-      }
-      if (nearest && minDist < 0.0003) return nearest.properties || {};
+  function findContaining(features) {
+    for (const f of features) {
+      if (f.geometry && pointInGeometry(lng, lat, f.geometry)) return f;
     }
     return null;
-  } catch(e) {}
-  return null;
+  }
+
+  try {
+    // ① まず中心タイル
+    let features = await getTile(x, y);
+    let hit = findContaining(features);
+    if (hit) {
+      if (apiId === 'XKT002') console.log(`[${apiId}] 中心タイルで選択:`, hit.properties?.use_area_ja);
+      return hit.properties || {};
+    }
+
+    // ② 中心になければ周囲8タイルを順次追加（500を避けるため少しずつ）
+    const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+    for (const [dx, dy] of neighbors) {
+      const nf = await getTile(x+dx, y+dy);
+      features = features.concat(nf);
+      hit = findContaining(nf);
+      if (hit) {
+        if (apiId === 'XKT002') console.log(`[${apiId}] 隣接タイル(${dx},${dy})で選択:`, hit.properties?.use_area_ja);
+        return hit.properties || {};
+      }
+    }
+
+    // ③ それでも含むポリゴンがなければ最寄り救済（境界誤差30m以内）
+    let nearest = null, minDist = Infinity;
+    for (const f of features) {
+      const d = minDistToGeometry(lng, lat, f.geometry);
+      if (d < minDist) { minDist = d; nearest = f; }
+    }
+    if (apiId === 'XKT002') console.log(`[${apiId}] 全${features.length}件、照準含むポリゴンなし。最寄り:`, nearest?.properties?.use_area_ja, `距離(度)≈${minDist.toFixed(6)}`);
+    if (nearest && minDist < 0.0003) return nearest.properties || {};
+    return null;
+  } catch(e) {
+    return null;
+  }
 }
 
 /* 点から最寄りのポリゴン境界までの近似距離（度単位） */
@@ -676,16 +669,15 @@ async function fetchInfo() {
   const lng = currentLng, lat = currentLat;
 
   try {
-    // 7本のAPIを並列取得（照準座標を含むポリゴンを選択）
-    const [zoning, fire, flood, highTide, tsunami, sediment, liquid] = await Promise.all([
-      safeApiCall('XKT002', z, x, y, lng, lat), // 用途地域
-      safeApiCall('XKT014', z, x, y, lng, lat), // 防火地域
-      safeApiCall('XKT026', z, x, y, lng, lat), // 洪水
-      safeApiCall('XKT027', z, x, y, lng, lat), // 高潮
-      safeApiCall('XKT028', z, x, y, lng, lat), // 津波
-      safeApiCall('XKT029', z, x, y, lng, lat), // 土砂災害
-      safeApiCall('XKT025', z, x, y, lng, lat), // 液状化
-    ]);
+    // APIを順次取得（一斉並列だとAPI側が500を返すため、負荷を平準化）
+    const sleep = ms => new Promise(s => setTimeout(s, ms));
+    const zoning   = await safeApiCall('XKT002', z, x, y, lng, lat); await sleep(120); // 用途地域
+    const fire     = await safeApiCall('XKT014', z, x, y, lng, lat); await sleep(120); // 防火地域
+    const flood    = await safeApiCall('XKT026', z, x, y, lng, lat); await sleep(120); // 洪水
+    const highTide = await safeApiCall('XKT027', z, x, y, lng, lat); await sleep(120); // 高潮
+    const tsunami  = await safeApiCall('XKT028', z, x, y, lng, lat); await sleep(120); // 津波
+    const sediment = await safeApiCall('XKT029', z, x, y, lng, lat); await sleep(120); // 土砂災害
+    const liquid   = await safeApiCall('XKT025', z, x, y, lng, lat);                   // 液状化
 
     const parsedZoning = {
       用途地域: zoning?.use_area_ja                    || '都市計画区域外',
