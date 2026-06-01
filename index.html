@@ -587,51 +587,46 @@ async function safeApiCall(apiId, z, x, y, lng, lat) {
   }
 
   try {
-    // ① まず中心タイル
+    // ① 中心タイル取得。内外判定で当たればそれを採用
     let features = await getTile(x, y);
     let hit = findContaining(features);
     if (hit) {
-      if (apiId === 'XKT002') { window.__zoningDiag = {結果:'中心タイルで取得', 用途:hit.properties?.use_area_ja}; }
+      if (apiId === 'XKT002') { window.__zoningDiag = {結果:'中心タイル内で確定', 用途:hit.properties?.use_area_ja}; }
       return hit.properties || {};
     }
 
-    // ② 中心になければ周囲8タイルを順次追加
+    // ② 周囲8タイルも集める（内外判定も試す）
     const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
-    let tileLog = [`中心(${x},${y}):${features.length}件`];
     for (const [dx, dy] of neighbors) {
       const nf = await getTile(x+dx, y+dy);
-      tileLog.push(`(${dx},${dy}):${nf.length}件`);
       features = features.concat(nf);
       hit = findContaining(nf);
       if (hit) {
-        if (apiId === 'XKT002') { window.__zoningDiag = {結果:`隣接(${dx},${dy})で取得`, 用途:hit.properties?.use_area_ja}; }
+        if (apiId === 'XKT002') { window.__zoningDiag = {結果:`隣接(${dx},${dy})内で確定`, 用途:hit.properties?.use_area_ja}; }
         return hit.properties || {};
       }
     }
 
-    // 診断：全タイル探しても当たらなかった場合の詳細
+    // ③ 内外判定で当たらない場合（タイル境界でポリゴンがクリップされているため）
+    //    照準に最も近いポリゴンを採用する
+    let nearest = null, minDist = Infinity;
+    for (const f of features) {
+      if (!f.geometry) continue;
+      const d = minDistToGeometry(lng, lat, f.geometry);
+      if (d < minDist) { minDist = d; nearest = f; }
+    }
     if (apiId === 'XKT002') {
-      let bbox=[999,999,-999,-999];
-      for (const f of features) {
-        if (!f.geometry) continue;
-        const rings = f.geometry.type==='Polygon'?[f.geometry.coordinates[0]]:f.geometry.type==='MultiPolygon'?f.geometry.coordinates.map(p=>p[0]):[];
-        for (const ring of rings) for (const c of ring){ bbox[0]=Math.min(bbox[0],c[0]);bbox[1]=Math.min(bbox[1],c[1]);bbox[2]=Math.max(bbox[2],c[0]);bbox[3]=Math.max(bbox[3],c[1]); }
-      }
-      let nearest=null,minDist=Infinity;
-      for (const f of features){ const d=minDistToGeometry(lng,lat,f.geometry); if(d<minDist){minDist=d;nearest=f;} }
       window.__zoningDiag = {
-        結果: '全タイル探索しても照準を含むポリゴンなし',
-        タイル別件数: tileLog.join(' / '),
-        全ポリゴン範囲: `経度${bbox[0].toFixed(5)}〜${bbox[2].toFixed(5)} 緯度${bbox[1].toFixed(5)}〜${bbox[3].toFixed(5)}`,
-        照準: `経度${lng.toFixed(5)} 緯度${lat.toFixed(5)}`,
-        最寄りポリゴン: nearest?.properties?.use_area_ja,
-        最寄り距離_m: Math.round(minDist*111000)
+        結果: 'タイル境界クリップのため最寄りポリゴンを採用',
+        採用した用途: nearest?.properties?.use_area_ja,
+        最寄り距離_m: Math.round(minDist*111000),
+        照準: `${lng.toFixed(5)}, ${lat.toFixed(5)}`
       };
-      if (nearest && minDist < 0.0003) return nearest.properties || {};
-    } else {
-      let nearest=null,minDist=Infinity;
-      for (const f of features){ const d=minDistToGeometry(lng,lat,f.geometry); if(d<minDist){minDist=d;nearest=f;} }
-      if (nearest && minDist < 0.0003) return nearest.properties || {};
+    }
+    // ハザード系は誤検出を避けたいので近接(約50m)のみ採用、用途地域は最寄りを必ず採用
+    if (nearest) {
+      if (apiId === 'XKT002') return nearest.properties || {};
+      if (minDist < 0.00045) return nearest.properties || {};
     }
     return null;
   } catch(e) {
