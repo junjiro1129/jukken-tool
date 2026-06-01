@@ -591,30 +591,48 @@ async function safeApiCall(apiId, z, x, y, lng, lat) {
     let features = await getTile(x, y);
     let hit = findContaining(features);
     if (hit) {
-      if (apiId === 'XKT002') console.log(`[${apiId}] 中心タイルで選択:`, hit.properties?.use_area_ja);
+      if (apiId === 'XKT002') { window.__zoningDiag = {結果:'中心タイルで取得', 用途:hit.properties?.use_area_ja}; }
       return hit.properties || {};
     }
 
-    // ② 中心になければ周囲8タイルを順次追加（500を避けるため少しずつ）
+    // ② 中心になければ周囲8タイルを順次追加
     const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]];
+    let tileLog = [`中心(${x},${y}):${features.length}件`];
     for (const [dx, dy] of neighbors) {
       const nf = await getTile(x+dx, y+dy);
+      tileLog.push(`(${dx},${dy}):${nf.length}件`);
       features = features.concat(nf);
       hit = findContaining(nf);
       if (hit) {
-        if (apiId === 'XKT002') console.log(`[${apiId}] 隣接タイル(${dx},${dy})で選択:`, hit.properties?.use_area_ja);
+        if (apiId === 'XKT002') { window.__zoningDiag = {結果:`隣接(${dx},${dy})で取得`, 用途:hit.properties?.use_area_ja}; }
         return hit.properties || {};
       }
     }
 
-    // ③ それでも含むポリゴンがなければ最寄り救済（境界誤差30m以内）
-    let nearest = null, minDist = Infinity;
-    for (const f of features) {
-      const d = minDistToGeometry(lng, lat, f.geometry);
-      if (d < minDist) { minDist = d; nearest = f; }
+    // 診断：全タイル探しても当たらなかった場合の詳細
+    if (apiId === 'XKT002') {
+      let bbox=[999,999,-999,-999];
+      for (const f of features) {
+        if (!f.geometry) continue;
+        const rings = f.geometry.type==='Polygon'?[f.geometry.coordinates[0]]:f.geometry.type==='MultiPolygon'?f.geometry.coordinates.map(p=>p[0]):[];
+        for (const ring of rings) for (const c of ring){ bbox[0]=Math.min(bbox[0],c[0]);bbox[1]=Math.min(bbox[1],c[1]);bbox[2]=Math.max(bbox[2],c[0]);bbox[3]=Math.max(bbox[3],c[1]); }
+      }
+      let nearest=null,minDist=Infinity;
+      for (const f of features){ const d=minDistToGeometry(lng,lat,f.geometry); if(d<minDist){minDist=d;nearest=f;} }
+      window.__zoningDiag = {
+        結果: '全タイル探索しても照準を含むポリゴンなし',
+        タイル別件数: tileLog.join(' / '),
+        全ポリゴン範囲: `経度${bbox[0].toFixed(5)}〜${bbox[2].toFixed(5)} 緯度${bbox[1].toFixed(5)}〜${bbox[3].toFixed(5)}`,
+        照準: `経度${lng.toFixed(5)} 緯度${lat.toFixed(5)}`,
+        最寄りポリゴン: nearest?.properties?.use_area_ja,
+        最寄り距離_m: Math.round(minDist*111000)
+      };
+      if (nearest && minDist < 0.0003) return nearest.properties || {};
+    } else {
+      let nearest=null,minDist=Infinity;
+      for (const f of features){ const d=minDistToGeometry(lng,lat,f.geometry); if(d<minDist){minDist=d;nearest=f;} }
+      if (nearest && minDist < 0.0003) return nearest.properties || {};
     }
-    if (apiId === 'XKT002') console.log(`[${apiId}] 全${features.length}件、照準含むポリゴンなし。最寄り:`, nearest?.properties?.use_area_ja, `距離(度)≈${minDist.toFixed(6)}`);
-    if (nearest && minDist < 0.0003) return nearest.properties || {};
     return null;
   } catch(e) {
     return null;
@@ -760,7 +778,19 @@ function renderResults(data, lat, lng, isMock) {
 
   const generatedText = zoningText + '\n' + hazardText;
 
-  document.getElementById('result-area').innerHTML = `
+  // 診断ボックス（用途地域が「都市計画区域外」になった場合のみ表示）
+  let diagHtml = '';
+  if (z['用途地域'] === '都市計画区域外' && window.__zoningDiag) {
+    const d = window.__zoningDiag;
+    const rows = Object.entries(d).map(([k,v]) => `${k}：${v}`).join('<br>');
+    diagHtml = `
+    <div class="card" style="background:#FAEEDA;border:0.5px solid #FAC775;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:600;color:#854F0B;margin-bottom:8px">🔍 用途地域 診断情報</div>
+      <div style="font-size:12px;color:#854F0B;line-height:1.9">${rows}</div>
+    </div>`;
+  }
+
+  document.getElementById('result-area').innerHTML = diagHtml + `
   <div class="card">
     <div class="card-title">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
